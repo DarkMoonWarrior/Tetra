@@ -46,7 +46,7 @@ export const THINKING = {
   low: { name: '低', note: '不开思考模式，出题最快、最省 Token，适合基础题' },
   medium: { name: '中', note: '构造题目和规划解法时先想清楚，审题、复核直接答；比高快，比低稳' },
   high: { name: '高', note: '构造题目、审题、规划解法和复核时都先想清楚再答，算得更准，会慢一些' },
-  max: { name: '极高', note: '和高一样的几步，但用模型最深的一档思考（max）：最准，也最慢、最费 Token' },
+  max: { name: '极高', note: '最高的思考强度，但是会更快地消耗 Token' },
 };
 export const FORCE_THINKING_FROM = 4;
 const THINKING_ORDER = Object.keys(THINKING);
