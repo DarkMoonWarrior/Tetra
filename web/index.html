@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tetra 命题智能体</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d0d0d'/%3E%3Cg fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15.8 5.5 6 21.5l7.6 5.2 12.6-6.1Z'/%3E%3Cpath d='M15.8 5.5 13.6 26.7'/%3E%3Cpath d='M6 21.5 26.2 20.6' stroke-width='1.4' stroke-dasharray='2 2.3'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="app.css">
+  <script defer src="vendor/katex/katex.min.js"></script>
+  <script defer src="vendor/katex/contrib/auto-render.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body class="is-idle">
+  <div class="app">
+    <div class="scrim" id="scrim" aria-hidden="true"></div>
+    <aside class="rail" id="rail" aria-label="导航和对话">
+      <div class="brand-row">
+        <div class="brand" title="Tetra：正四面体有四个面，对应命题、审题、解题、复核四个互相把关的角色">
+          <svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M15.8 2.8 3.2 23.2l9.8 6.4z" fill="currentColor" fill-opacity="0.12" stroke="none"/>
+            <path d="M15.8 2.8 3.2 23.2l9.8 6.4 16-7.8Z"/>
+            <path d="M15.8 2.8 13 29.6"/>
+            <path d="M3.2 23.2 29 21.8" stroke-width="1.3" stroke-dasharray="2 2.4"/>
+          </svg>
+          <span class="brand-name">Tetra</span>
+        </div>
+        <button class="icon-btn rail-hide" id="railHide" type="button" aria-label="收起侧栏" title="收起侧栏">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="m16 10-2 2 2 2"/></svg>
+        </button>
+      </div>
+      <button class="new-task" id="newTask" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        新对话
+      </button>
+      <nav class="rail-nav">
+        <button class="rail-link" id="bankLink" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/><path d="M9 7h6"/></svg>
+          题库<span class="rail-count" id="bankCount"></span>
+        </button>
+        <button class="rail-link" id="papersLink" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+          试卷<span class="rail-count" id="paperCount"></span>
+        </button>
+        <button class="rail-link" id="experimentLink" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
+          对比实验
+        </button>
+      </nav>
+      <h2 class="rail-title">对话</h2>
+      <ul class="history-list" id="historyList"></ul>
+      <div class="account" id="account">
+        <div class="account-menu" id="accountMenu" role="menu" aria-label="个人设置" hidden></div>
+        <button class="account-btn" id="accountBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu">
+          <span class="avatar" id="accountAvatar" aria-hidden="true"></span>
+          <span class="account-text"><b id="accountName">个人设置</b><small id="accountNote">称呼、出题偏好、模型</small></span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+        </button>
+      </div>
+      <div class="splitter" id="railSplit" role="separator" aria-orientation="vertical" aria-label="拖动调整左栏宽度，双击恢复默认" title="拖动调整宽度，双击恢复默认" tabindex="0"></div>
+    </aside>
+
+    <button class="icon-btn menu-toggle" id="menuToggle" type="button" aria-label="展开侧栏" title="展开侧栏">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="m14 10 2 2-2 2"/></svg>
+    </button>
+
+    <main class="stage">
+      <section class="thread">
+        <canvas class="geometry" id="geometry" aria-hidden="true"></canvas>
+        <div class="thread-scroll" id="threadScroll">
+          <div class="hero" id="hero">
+            <p class="hero-hello" id="heroHello"></p>
+            <h1 class="hero-title">想出一道什么样的题？</h1>
+            <p class="hero-alert" id="heroAlert" role="alert" hidden></p>
+            <div id="heroSlot"></div>
+            <section class="suggest" aria-labelledby="suggestTitle">
+              <div class="suggest-head">
+                <h2 id="suggestTitle">没想好出什么？试试模拟卷里的命题要求</h2>
+                <button class="link-btn" id="shuffleSuggest" type="button">换一批</button>
+                <button class="link-btn" id="openBlueprints" type="button">看全部 171 条</button>
+              </div>
+              <ul class="suggest-list" id="suggestList"></ul>
+            </section>
+          </div>
+
+          <!-- 一个对话里的每道题是一轮（见 js/turn.js），按先后往下排 -->
+          <div class="conversation" id="conversation" hidden></div>
+
+          <section class="library" id="bankView" hidden></section>
+          <section class="papers" id="paperView" hidden></section>
+
+          <section class="experiment" id="experiment" hidden>
+            <h1>对比实验</h1>
+            <p class="lead">从 9 套模拟卷的 171 条命题要求里抽出测试集，用下面几种配置分别出题，看每加一道检查、每多试一个方案，质量和代价各变化多少。实验跑完后，结果会放在这里。</p>
+            <table class="config-table">
+              <thead><tr><th>配置</th><th>包含的环节</th><th>想回答的问题</th><th>状态</th></tr></thead>
+              <tbody>
+                <tr><td><span class="key">A</span>单次生成</td><td>只有命题</td><td>直接让大模型出题，质量是什么水平</td><td><span class="pill">待运行</span></td></tr>
+                <tr><td><span class="key">B</span>加审题</td><td>命题、审题、退回修改</td><td>出题后先审一遍，能拦住多少有问题的题</td><td><span class="pill">待运行</span></td></tr>
+                <tr><td><span class="key">C</span>完整闭环</td><td>命题、审题、解题、复核</td><td>解题后再复核，答案正确率能提高多少</td><td><span class="pill">待运行</span></td></tr>
+                <tr><td><span class="key">D</span>加独立验算</td><td>C 加验算员</td><td>换个角色再独立算一遍，值不值这份开销</td><td><span class="pill">待运行</span></td></tr>
+                <tr><td><span class="key">E</span>三个方案并行</td><td>C，同时试三个方案</td><td>多试几个方案能省多少等待时间，多花多少 Token</td><td><span class="pill">待运行</span></td></tr>
+              </tbody>
+            </table>
+            <h2>怎么比</h2>
+            <ul class="metric-list">
+              <li>规则检查通过率：结构、正确选项个数、干扰项这些程序能查的项目</li>
+              <li>答案正确率：另请模型独立解 3 次取多数作为判定，再人工抽查 30 道，看这个判定靠不靠谱</li>
+              <li>是否符合要求：知识点、题型、难度和要求一致吗</li>
+              <li>人工评分：组员不知道是哪种配置出的题，直接打分</li>
+              <li>代价：每道题的模型调用次数、Token 和用时</li>
+            </ul>
+          </section>
+        </div>
+        <div class="dock" id="dock"></div>
+      </section>
+
+      <aside class="sheet-panel" id="sheetPanel" aria-labelledby="sheetHeading" hidden>
+        <div class="splitter" id="sheetSplit" role="separator" aria-orientation="vertical" aria-label="拖动调整右栏宽度，双击恢复默认" title="拖动调整宽度，双击恢复默认" tabindex="0"></div>
+        <header class="sheet-head">
+          <div class="sheet-title"><h2 id="sheetHeading">题目</h2><span id="sheetNote"></span></div>
+          <div class="sheet-tabs" id="sheetTabs" role="group" aria-label="切换方案"></div>
+          <div class="sheet-actions">
+            <span class="panel-actions" id="panelActions"></span>
+            <button class="ghost-btn" id="copyBtn" type="button" hidden>复制题目和解析</button>
+            <button class="icon-btn" id="closeSheet" type="button" aria-label="收起题目">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+          </div>
+        </header>
+        <div class="sheet-scroll" id="sheetScroll"></div>
+      </aside>
+    </main>
+  </div>
+
+  <form class="composer" id="composer" autocomplete="off">
+    <textarea id="prompt" rows="2" aria-label="补充要求" placeholder="补充要求写在这里"></textarea>
+    <div class="composer-row">
+      <div class="chips">
+        <button type="button" class="chip" id="kpChip" data-pop="kp" aria-haspopup="dialog" aria-expanded="false"></button>
+        <button type="button" class="chip" id="typeChip" data-pop="type" aria-haspopup="menu" aria-expanded="false"></button>
+        <button type="button" class="chip" id="levelChip" data-pop="level" aria-haspopup="menu" aria-expanded="false"></button>
+        <button type="button" class="chip" id="countChip" data-pop="count" aria-haspopup="menu" aria-expanded="false"></button>
+        <button type="button" class="chip" id="useChip" data-pop="use" aria-haspopup="dialog" aria-expanded="false"></button>
+      </div>
+      <div class="composer-tools">
+        <button type="button" class="chip tool" id="modelChip" data-pop="model" aria-haspopup="dialog" aria-expanded="false"></button>
+        <button type="submit" class="send" id="sendBtn" aria-label="出题" title="出题">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+        </button>
+      </div>
+    </div>
+    <p class="task-line" id="taskLine"></p>
+  </form>
+
+  <div class="popover" id="popover" role="dialog" hidden></div>
+
+  <dialog class="blueprints" id="blueprintDialog" aria-labelledby="bpTitle">
+    <div class="bp-inner">
+      <div class="bp-head">
+        <h3 id="bpTitle">模拟卷里的 171 条命题要求</h3>
+        <button class="icon-btn" id="closeBlueprints" type="button" aria-label="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="bp-tools">
+        <input type="search" id="bpSearch" placeholder="搜索，比如：椭圆、概率、新定义" aria-label="搜索命题要求">
+        <select id="bpType" aria-label="题型">
+          <option value="">全部题型</option>
+          <option value="single_choice">单选题</option>
+          <option value="multiple_choice">多选题</option>
+          <option value="fill_blank">填空题</option>
+          <option value="open_response">解答题</option>
+        </select>
+      </div>
+      <ul class="bp-list" id="bpList"></ul>
+    </div>
+  </dialog>
+
+  <dialog class="settings" id="settingsDialog" aria-labelledby="settingsTitle">
+    <div class="settings-shell">
+      <nav class="settings-nav" aria-label="设置分类">
+        <h2 id="settingsTitle">个人设置</h2>
+        <div class="settings-tabs" id="settingsTabs" role="tablist" aria-orientation="vertical"></div>
+        <p class="settings-where">保存在这台电脑上</p>
+      </nav>
+      <section class="settings-main" id="settingsPanel" role="tabpanel">
+        <header class="settings-head">
+          <h3 id="settingsSectionTitle"></h3>
+          <button class="icon-btn" id="closeSettings" type="button" aria-label="关闭个人设置">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </header>
+        <div class="settings-body" id="settingsBody"></div>
+        <p class="settings-status" id="settingsStatus" role="status"></p>
+      </section>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tetra-mingti"
+version = "0.1.0"
+description = "Tetra 命题智能体：基于大语言模型闭环审校的高中数学命题智能体"
+requires-python = ">=3.10"
+# 这里故意不列依赖：tetra 命令只是启动器（只用标准库），装进系统的 Python 也不会带进别的包。
+# 第一次运行 tetra 时，会在项目里建 .venv 并按 requirements.txt 装好依赖，应用跑在 .venv 里。
+dependencies = []
+
+[project.scripts]
+tetra = "mingti.launcher:main"
+
+[tool.setuptools.packages.find]
+include = ["mingti*"]

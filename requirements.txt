@@ -1,0 +1,9 @@
+fastapi>=0.115
+uvicorn>=0.30
+pydantic>=2.7
+python-docx>=1.1
+latex2mathml>=3.77
+numpy>=1.26
+anthropic>=2.4
+pypdf>=5.0
+pymupdf>=1.24

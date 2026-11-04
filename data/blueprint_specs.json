@@ -1,0 +1,1541 @@
+[
+ {
+  "id": "卷二-01",
+  "paper": "卷二",
+  "number": 1,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "百分位数（整数情形）",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷二-02",
+  "paper": "卷二",
+  "number": 2,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "一元二次与对数不等式、补集",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷二-03",
+  "paper": "卷二",
+  "number": 3,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "复数除法与模",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷二-04",
+  "paper": "卷二",
+  "number": 4,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "向量垂直",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷二-05",
+  "paper": "卷二",
+  "number": 5,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "三角整体代换 cos(2α+π/6)",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷二-06",
+  "paper": "卷二",
+  "number": 6,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "正四棱台“斗”容积（配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷二-07",
+  "paper": "卷二",
+  "number": 7,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "奇函数单调性解不等式",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷二-08",
+  "paper": "卷二",
+  "number": 8,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "～10 配对和为质数（奇偶＋分类计数）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷二-09",
+  "paper": "卷二",
+  "number": 9,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "两盒取球（全概率、条件概率、独立性）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷二-10",
+  "paper": "卷二",
+  "number": 10,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "由图象求 2sin(ωx+φ)（配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷二-11",
+  "paper": "卷二",
+  "number": 11,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "到原点与到直线 x=2 距离之和为 4 的曲线（两段抛物线弧，凸区域面积估计）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷二-12",
+  "paper": "卷二",
+  "number": 12,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "等差数列 S20",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷二-13",
+  "paper": "卷二",
+  "number": 13,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "过定点直线截圆最短弦",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷二-14",
+  "paper": "卷二",
+  "number": 14,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "九连环递推（双空）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷二-15",
+  "paper": "卷二",
+  "number": 15,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "四棱锥梯形底，线面平行＋二面角求高与体积（配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷二-16",
+  "paper": "卷二",
+  "number": 16,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "√3 b sin((B+C)/2)=a sin B，面积最大、中线范围",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷二-17",
+  "paper": "卷二",
+  "number": 17,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "乒乓球 10 平后轮换发球，等比求和与极限",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷二-18",
+  "paper": "卷二",
+  "number": 18,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "椭圆 k_OA·k_OB=-1/4，面积定值、|OM| 最值（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷二-19",
+  "paper": "卷二",
+  "number": 19,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "折线距离：图形面积、与欧氏距离比较、中位数选址",
+  "target_difficulty": 5
+ },
+ {
+  "id": "卷三-01",
+  "paper": "卷三",
+  "number": 1,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "向量模长",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷三-02",
+  "paper": "卷三",
+  "number": 2,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "z+2z̄=3−i",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷三-03",
+  "paper": "卷三",
+  "number": 3,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "{x−y}元素个数",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷三-04",
+  "paper": "卷三",
+  "number": 4,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "等差基本量",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷三-05",
+  "paper": "卷三",
+  "number": 5,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "sinθ+cosθ=1/5 求 cos2θ（象限判断）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷三-06",
+  "paper": "卷三",
+  "number": 6,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "二十四节气研学分组（间接法）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷三-07",
+  "paper": "卷三",
+  "number": 7,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "抛物线焦点弦 |AF|=3|BF|",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷三-08",
+  "paper": "卷三",
+  "number": 8,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "f(x+1)偶、f(x+2)奇，周期求和",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷三-09",
+  "paper": "卷三",
+  "number": 9,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "充电量回归（b̂、r、残差）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷三-10",
+  "paper": "卷三",
+  "number": 10,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "ln(e^x+1)−x/2 偶函数与导数范围",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷三-11",
+  "paper": "卷三",
+  "number": 11,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "正四面体 EF⊥AB、外接球、点面距离（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷三-12",
+  "paper": "卷三",
+  "number": 12,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "(2x−1/x)^6 常数项",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷三-13",
+  "paper": "卷三",
+  "number": 13,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "sin2x+2√3cos²x 最值和",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷三-14",
+  "paper": "卷三",
+  "number": 14,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "甲抛 5 次乙抛 4 次正面多的概率=1/2（对称性）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷三-15",
+  "paper": "卷三",
+  "number": 15,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "续航里程直方图＋B(3,1/4)（配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷三-16",
+  "paper": "卷三",
+  "number": 16,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "直三棱柱 AB1⊥A1C，二面角定 M（配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷三-17",
+  "paper": "卷三",
+  "number": 17,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "圆内接四边形 AB=3、AD=5、∠BAD=120°、BC=CD（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷三-18",
+  "paper": "卷三",
+  "number": 18,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "双曲线切线与渐近线：中点、面积定值、|MN| 最小（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷三-19",
+  "paper": "卷三",
+  "number": 19,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "牛顿法求 √2：递推、单调、误差估计（配图）",
+  "target_difficulty": 5
+ },
+ {
+  "id": "卷四-01",
+  "paper": "卷四",
+  "number": 1,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "定义域∩值域",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷四-02",
+  "paper": "卷四",
+  "number": 2,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "−i 为实系数方程根求 a+b",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷四-03",
+  "paper": "卷四",
+  "number": 3,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "BE 用 AB、AC 表示",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷四-04",
+  "paper": "卷四",
+  "number": 4,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "正态分布对称",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷四-05",
+  "paper": "卷四",
+  "number": 5,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "正三棱锥外接球 16π",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷四-06",
+  "paper": "卷四",
+  "number": 6,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "sin(2x+π/3) 右移 φ 成偶函数",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷四-07",
+  "paper": "卷四",
+  "number": 7,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "贷款等额还款（等比求和）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷四-08",
+  "paper": "卷四",
+  "number": 8,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "sin0.1、0.1cos0.05、ln1.1 比较",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷四-09",
+  "paper": "卷四",
+  "number": 9,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "抛物线 x²=4y 性质（正三角形 PQF、1/|AF|+1/|BF|、以 PF 为直径的圆）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷四-10",
+  "paper": "卷四",
+  "number": 10,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "(x−1)eˣ：极值、过原点无切线、极值点偏移 x1+x2<0",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷四-11",
+  "paper": "卷四",
+  "number": 11,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "a_{n+1}=a_n/(1+a_n²)：1/a² 放缩、裂项求和",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷四-12",
+  "paper": "卷四",
+  "number": 12,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "tanα=2 求比值",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷四-13",
+  "paper": "卷四",
+  "number": 13,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "B=π/3、b=√3、a+c=3 求面积",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷四-14",
+  "paper": "卷四",
+  "number": 14,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "xeˣ−a(x+ln x) 两零点 → a>e（同构）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷四-15",
+  "paper": "卷四",
+  "number": 15,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "测古塔（正弦定理、仰角，配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷四-16",
+  "paper": "卷四",
+  "number": 16,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "x²=4y 准线上点的两切线：垂直、过焦点、面积最小 4（配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷四-17",
+  "paper": "卷四",
+  "number": 17,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "刍甍：面面垂直、体积 10√2/3、二面角余弦 1/3（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷四-18",
+  "paper": "卷四",
+  "number": 18,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "ln x−a(x−1/x)：f(1/x)=−f(x)、零点个数、x0>1/(2a)",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷四-19",
+  "paper": "卷四",
+  "number": 19,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "约数列：12 的约数列、项数奇⇔完全平方、等差约数列⇒质数、k=6 且前三项和 8 ⇒ n=50",
+  "target_difficulty": 5
+ },
+ {
+  "id": "卷五-01",
+  "paper": "卷五",
+  "number": 1,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "方差线性变换",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷五-02",
+  "paper": "卷五",
+  "number": 2,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "e1、e2 基底下共线求 λ",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷五-03",
+  "paper": "卷五",
+  "number": 3,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "|x−1|<2 与 2^x>4 并集",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷五-04",
+  "paper": "卷五",
+  "number": 4,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "复数 z²",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷五-05",
+  "paper": "卷五",
+  "number": 5,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "sin(α+β)=2/3、tanα=3tanβ 求 sin(α−β)",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷五-06",
+  "paper": "卷五",
+  "number": 6,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "圆台水杯注水到半高",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷五-07",
+  "paper": "卷五",
+  "number": 7,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "椭圆焦点三角形 |PF1|=2|PF2|",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷五-08",
+  "paper": "卷五",
+  "number": 8,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "ΣPA·PB 最小值（重心）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷五-09",
+  "paper": "卷五",
+  "number": 9,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "|sin x|+cos x 性质",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷五-10",
+  "paper": "卷五",
+  "number": 10,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "B(5,0.8) 期望方差最值与条件概率",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷五-11",
+  "paper": "卷五",
+  "number": 11,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "正方体截面 AMND1：等腰梯形、7:17（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷五-12",
+  "paper": "卷五",
+  "number": 12,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "(1+x)^5(1−x) 的 x² 系数",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷五-13",
+  "paper": "卷五",
+  "number": 13,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "渐近线与直线垂直求 e",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷五-14",
+  "paper": "卷五",
+  "number": 14,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "正三棱柱侧面动点 AP=2 轨迹长 π",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷五-15",
+  "paper": "卷五",
+  "number": 15,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "圆柱母线、面面垂直、二面角求高与体积（配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷五-16",
+  "paper": "卷五",
+  "number": 16,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "由图象求 2sin(2x−π/6)、锐角三角形周长范围（配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷五-17",
+  "paper": "卷五",
+  "number": 17,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "分组混合检测：分布列、最优 k=4、p<1−√2/2",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷五-18",
+  "paper": "卷五",
+  "number": 18,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "椭圆 x²/4+y²/3=1 切线：d1d2=3、光学性质、d1+d2∈[2√3,4]（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷五-19",
+  "paper": "卷五",
+  "number": 19,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "λ-控制函数：√x、x−a ln x 求 a∈[1,3/2]、迭代数列 |a_n|<2",
+  "target_difficulty": 5
+ },
+ {
+  "id": "卷六-01",
+  "paper": "卷六",
+  "number": 1,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "(1+2i)(2−i) 虚部",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷六-02",
+  "paper": "卷六",
+  "number": 2,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "√(x+2)=x 与集合关系",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷六-03",
+  "paper": "卷六",
+  "number": 3,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "|a±b| 求 a·b",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷六-04",
+  "paper": "卷六",
+  "number": 4,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "双曲线焦点到渐近线距离",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷六-05",
+  "paper": "卷六",
+  "number": 5,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "菱形沿 AC 折成直二面角求 BD",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷六-06",
+  "paper": "卷六",
+  "number": 6,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "甲乙同馆的志愿者分配",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷六-07",
+  "paper": "卷六",
+  "number": 7,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "cosα=−3/5 求 tan(α+π/4)",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷六-08",
+  "paper": "卷六",
+  "number": 8,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "a_{n+1}=a_n²−a_n+1 倒数和估值",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷六-09",
+  "paper": "卷六",
+  "number": 9,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "两圆位置关系（外切、公切线、平分周长）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷六-10",
+  "paper": "卷六",
+  "number": 10,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "x²−a ln x 的图象选择（选图象新题型，配四个图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷六-11",
+  "paper": "卷六",
+  "number": 11,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "圆锥：展开图、过顶点截面、绕一周最短、内切球（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷六-12",
+  "paper": "卷六",
+  "number": 12,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "(x−2/x)^6 的 x² 系数",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷六-13",
+  "paper": "卷六",
+  "number": 13,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "^x−a·2^{x+1}+4 在 [0,2] 两零点",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷六-14",
+  "paper": "卷六",
+  "number": 14,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "三棱锥侧面展开蚂蚁最短路程",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷六-15",
+  "paper": "卷六",
+  "number": 15,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "AI 学习工具时长与成绩 2×2 列联表、超几何",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷六-16",
+  "paper": "卷六",
+  "number": 16,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "正四棱锥面面垂直、AM 与面 PBC 线面角最大 √15/5（配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷六-17",
+  "paper": "卷六",
+  "number": 17,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "S_n=2a_n−2、错位相减、裂项 T_n>0.99",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷六-18",
+  "paper": "卷六",
+  "number": 18,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "y²=4x、P 在 x=−2 上：AB 过 (2,0)、PM∥x 轴、面积最小 8√2（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷六-19",
+  "paper": "卷六",
+  "number": 19,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "eˣ−a sin x−1：恒成立 a≤1、隐零点估计 π/4<x1<π/3",
+  "target_difficulty": 5
+ },
+ {
+  "id": "卷七-01",
+  "paper": "卷七",
+  "number": 1,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "x²<4 交集个数",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷七-02",
+  "paper": "卷七",
+  "number": 2,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "i/(1+i) 共轭所在象限",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷七-03",
+  "paper": "卷七",
+  "number": 3,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "AQI 折线图（中位数 75）（配图）",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷七-04",
+  "paper": "卷七",
+  "number": 4,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "(a+b)⊥a 求夹角",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷七-05",
+  "paper": "卷七",
+  "number": 5,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "sin(π/6−α)=1/3 求 cos(2π/3+2α)",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷七-06",
+  "paper": "卷七",
+  "number": 6,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "半圆竹编围成斗笠（圆锥体积）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷七-07",
+  "paper": "卷七",
+  "number": 7,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "Logistic 新能源车保有量 80% 时 t≈7.2",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷七-08",
+  "paper": "卷七",
+  "number": 8,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "个格点取两点 E|PQ|²=25/3（期望线性性）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷七-09",
+  "paper": "卷七",
+  "number": 9,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "不放回取球条件概率与独立性",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷七-10",
+  "paper": "卷七",
+  "number": 10,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "x³−3x²+ax 对称、极值、切线、单调",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷七-11",
+  "paper": "卷七",
+  "number": 11,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "隐函数曲线 y³+y=x³−x",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷七-12",
+  "paper": "卷七",
+  "number": 12,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "x²−y²/m=1 的 e=2",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷七-13",
+  "paper": "卷七",
+  "number": 13,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": ",4,6,8,x 平均数=中位数（x 和 15）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷七-14",
+  "paper": "卷七",
+  "number": 14,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "连续三项二项式系数比 3:8:14 → n=10",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷七-15",
+  "paper": "卷七",
+  "number": 15,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "c²=b(a+b) ⇒ C=2B，锐角时 (a+c)/b∈(1+√2,2+√3)",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷七-16",
+  "paper": "卷七",
+  "number": 16,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "x²/9+y²/5=1 焦半径、内切圆切点、内心轨迹 x²+5y²=4（配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷七-17",
+  "paper": "卷七",
+  "number": 17,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "斜三棱柱含正四面体、体积 2√2、B1C1 上存在两点（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷七-18",
+  "paper": "卷七",
+  "number": 18,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "闯关节目分布列、E_k 最大 k=3、恒 0.8 时 k=4 或 5",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷七-19",
+  "paper": "卷七",
+  "number": 19,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "2x/(x+2)<ln(1+x)<3x/(x+3)、a_{n+1}=ln(1+a_n) 双边估计",
+  "target_difficulty": 5
+ },
+ {
+  "id": "卷八-01",
+  "paper": "卷八",
+  "number": 1,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "第 25 百分位数",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷八-02",
+  "paper": "卷八",
+  "number": 2,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "c=xa+yb 坐标",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷八-03",
+  "paper": "卷八",
+  "number": 3,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "cos(kπ/3) 集合∩不等式",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷八-04",
+  "paper": "卷八",
+  "number": 4,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "(a+i)(1−2i) 纯虚数",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷八-05",
+  "paper": "卷八",
+  "number": 5,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "圆台侧面积求体积 7π/3",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷八-06",
+  "paper": "卷八",
+  "number": 6,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "sin(ωx+π/4) 在 (0,π/2) 递增 ω 最大 1/2",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷八-07",
+  "paper": "卷八",
+  "number": 7,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "谢尔宾斯基三角形（配图）n=6",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷八-08",
+  "paper": "卷八",
+  "number": 8,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "掷骰 a≤b≤c 概率 7/27（插板）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷八-09",
+  "paper": "卷八",
+  "number": 9,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "正态分布 N(10,0.04) 质检",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷八-10",
+  "paper": "卷八",
+  "number": 10,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "cos2x+2sin x 最值对称周期",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷八-11",
+  "paper": "卷八",
+  "number": 11,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "正八面体晶体（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷八-12",
+  "paper": "卷八",
+  "number": 12,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "(x−1/(2√x))^6 常数项 15/16",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷八-13",
+  "paper": "卷八",
+  "number": 13,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "y=kx+1 截圆弦长 2√2 → k=1",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷八-14",
+  "paper": "卷八",
+  "number": 14,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "人取礼物恰 2 人取到自己 1/6",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷八-15",
+  "paper": "卷八",
+  "number": 15,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "鳖臑（配图）外接球 16π、线面角 π/4",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷八-16",
+  "paper": "卷八",
+  "number": 16,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "平面四边形 BD=4、CD=√13、cos∠ADC=3√39/26（配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷八-17",
+  "paper": "卷八",
+  "number": 17,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "三条生产线全概率、贝叶斯、改造决策",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷八-18",
+  "paper": "卷八",
+  "number": 18,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "垂直平分线与 OM 交点轨迹：t=0 圆、0<t<2 椭圆、t=2 一点、t>2 双曲线（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷八-19",
+  "paper": "卷八",
+  "number": 19,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "随机排列“领先数”：P(A_k)=1/k、两两独立、E(X)=调和数、ln(n+1)<E(X)<1+ln n",
+  "target_difficulty": 5
+ },
+ {
+  "id": "卷九-01",
+  "paper": "卷九",
+  "number": 1,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "(1+i)z=2−2i",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷九-02",
+  "paper": "卷九",
+  "number": 2,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "x²−5x+4<0 与 |x−2|≥1 交集",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷九-03",
+  "paper": "卷九",
+  "number": 3,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "(a−b)⊥b 求 m",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷九-04",
+  "paper": "卷九",
+  "number": 4,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "双曲线焦半径 4 或 16（两支都可）",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷九-05",
+  "paper": "卷九",
+  "number": 5,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "tanα、tan(α−β) 求 tanβ=9/8",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷九-06",
+  "paper": "卷九",
+  "number": 6,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "座 3 人不相邻 24 种",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷九-07",
+  "paper": "卷九",
+  "number": 7,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "轴截面正三角形的圆锥内切球:外接球=1:8",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷九-08",
+  "paper": "卷九",
+  "number": 8,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "阿波罗尼斯圆与圆 C 有公共点 a∈[1−√14/2,1+√14/2]",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷九-09",
+  "paper": "卷九",
+  "number": 9,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "分层合并均值 83、方差 22",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷九-10",
+  "paper": "卷九",
+  "number": 10,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "x ln x 最小值、切线、f(x)=a 两根、x²ln x 不单调",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷九-11",
+  "paper": "卷九",
+  "number": 11,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "斐波那契求和、平方和、F2026 奇、奇数项和",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷九-12",
+  "paper": "卷九",
+  "number": 12,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "抛物线焦半径 4",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷九-13",
+  "paper": "卷九",
+  "number": 13,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "甲乙投篮甲多于乙 0.39",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷九-14",
+  "paper": "卷九",
+  "number": 14,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "对棱相等四面体补形 10π",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷九-15",
+  "paper": "卷九",
+  "number": 15,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "AI 剪辑月活 y=e^{0.5x+1}、第 8 个月起扩容（散点图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷九-16",
+  "paper": "卷九",
+  "number": 16,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "正方体截面 AEC1F 菱形、夹角余弦 √6/3、V_{B-AEC1F}=4/3（配图）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷九-17",
+  "paper": "卷九",
+  "number": 17,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "三点仰角 30°/45°/60° 测塔高 30√6、OC⊥AC 距离 30√2（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷九-18",
+  "paper": "卷九",
+  "number": 18,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "x²/4+y²/2=1：斜率积 −1/2、k_BN=3k_AM、T 在 x=4 上（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷九-19",
+  "paper": "卷九",
+  "number": 19,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "eˣ−ax²：a≤e/2、a>e/2、x1x2<1<(x1+x2)/2（对数均值）",
+  "target_difficulty": 5
+ },
+ {
+  "id": "卷十-01",
+  "paper": "卷十",
+  "number": 1,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "^x>1/2 与整数集交集",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷十-02",
+  "paper": "卷十",
+  "number": 2,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "z(1−i)=|1+√3i|",
+  "target_difficulty": 1
+ },
+ {
+  "id": "卷十-03",
+  "paper": "卷十",
+  "number": 3,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "a⊥(a+b) 求 m",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷十-04",
+  "paper": "卷十",
+  "number": 4,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "“a>b”与“a|a|>b|b|”充要",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷十-05",
+  "paper": "卷十",
+  "number": 5,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "tan(α+π/4)=3 求 sin2α",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷十-06",
+  "paper": "卷十",
+  "number": 6,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "甜筒（圆锥展开图求体积）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷十-07",
+  "paper": "卷十",
+  "number": 7,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "椭圆 |PA|+|PF| 最大值 4+√5",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷十-08",
+  "paper": "卷十",
+  "number": 8,
+  "question_type": "single_choice",
+  "type_label": "单选题",
+  "topic": "三次函数 f(k)=1/k（k=1..4）求 f(5)=0（构造 xf(x)−1）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷十-09",
+  "paper": "卷十",
+  "number": 9,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "有放回与不放回摸球（二项分布 vs 超几何）",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷十-10",
+  "paper": "卷十",
+  "number": 10,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "x ln x−x+1 的性质",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷十-11",
+  "paper": "卷十",
+  "number": 11,
+  "question_type": "multiple_choice",
+  "type_label": "多选题",
+  "topic": "本福特定律（对数、文化情境，配条形图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷十-12",
+  "paper": "卷十",
+  "number": 12,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "(1−2x)^5 的 x³ 系数",
+  "target_difficulty": 2
+ },
+ {
+  "id": "卷十-13",
+  "paper": "卷十",
+  "number": 13,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "三人独立答题恰两人对 11/24",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷十-14",
+  "paper": "卷十",
+  "number": 14,
+  "question_type": "fill_blank",
+  "type_label": "填空题",
+  "topic": "×5 点阵中的正方形 50 个、斜放 20 个",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷十-15",
+  "paper": "卷十",
+  "number": 15,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "a_{n+1}=2a_n−n+1、S_n>2026 的最小 n=11",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷十-16",
+  "paper": "卷十",
+  "number": 16,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "x²−y²/2=1，过 (0,1) 的直线交右支：k∈(−√3,−√2)、|PA||PB|∈(12,+∞)",
+  "target_difficulty": 3
+ },
+ {
+  "id": "卷十-17",
+  "paper": "卷十",
+  "number": 17,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "菱形底四棱锥：PB∥平面 ACE、平面 AMD⊥平面 PCD 时 PM/PC=2/5（配图）",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷十-18",
+  "paper": "卷十",
+  "number": 18,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "eˣ−1−x 的最佳常数：>x²/2、≤(e−2)x²、|eˣ−1−ax|≤(e−2)x² ⇒ a=1",
+  "target_difficulty": 4
+ },
+ {
+  "id": "卷十-19",
+  "paper": "卷十",
+  "number": 19,
+  "question_type": "open_response",
+  "type_label": "解答题",
+  "topic": "取石子 S={1,k} 的先手负数（k 奇：偶数；k 偶：模 k+1 余 0,2,…,k−2）",
+  "target_difficulty": 5
+ }
+]
