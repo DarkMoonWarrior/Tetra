@@ -111,7 +111,7 @@ pep_a_r1_c5_s5,pep_a_r1_c5,必修第一册,section,5.5,三角恒等变换,和差
 kp_r1_5_5_01,pep_a_r1_c5_s5,必修第一册,knowledge_point,5.5.1,两角和与差公式,正弦余弦正切的和差角公式,kp_r1_5_2_03|kp_r1_5_3_03,数学运算,公式求值|恒等证明,正弦余弦公式符号混淆,high,ready_for_teacher_review,user_pending
 kp_r1_5_5_02,pep_a_r1_c5_s5,必修第一册,knowledge_point,5.5.2,二倍角公式,由和角公式得到二倍角公式,kp_r1_5_5_01,数学运算,化简求值|降幂,余弦二倍角形式选择不当,high,ready_for_teacher_review,user_pending
 kp_r1_5_5_03,pep_a_r1_c5_s5,必修第一册,knowledge_point,5.5.3,三角恒等变换综合,配角降幂辅助角和恒等证明,kp_r1_5_5_01|kp_r1_5_5_02,数学运算|逻辑推理,恒等变换|最值,盲目展开导致结构复杂,high,ready_for_teacher_review,user_pending
-pep_a_r1_c5_s6,pep_a_r1_c5,必修第一册,section,5.6,函数y等于Asinωx加φ,参数对图象的影响和图象变换,pep_a_r1_c5_s4|pep_a_r1_c5_s5,直观想象|数学建模,选择题|填空题|解答题,平移量与相位混淆,high,ready_for_teacher_review,user_pending
+pep_a_r1_c5_s6,pep_a_r1_c5,必修第一册,section,5.6,函数 y=Asin(ωx+φ),参数对图象的影响和图象变换,pep_a_r1_c5_s4|pep_a_r1_c5_s5,直观想象|数学建模,选择题|填空题|解答题,平移量与相位混淆,high,ready_for_teacher_review,user_pending
 kp_r1_5_6_01,pep_a_r1_c5_s6,必修第一册,knowledge_point,5.6.1,振幅周期相位,参数Aωφ的几何意义,kp_r1_5_4_01,数学抽象|直观想象,参数识别|性质判断,周期误写为二π乘ω,high,ready_for_teacher_review,user_pending
 kp_r1_5_6_02,pep_a_r1_c5_s6,必修第一册,knowledge_point,5.6.2,三角函数图象变换,平移伸缩和变换顺序,kp_r1_5_6_01,直观想象|数学运算,图象变换|表达式求解,先伸缩后平移换算错误,high,ready_for_teacher_review,user_pending
 kp_r1_5_6_03,pep_a_r1_c5_s6,必修第一册,knowledge_point,5.6.3,由图象求解析式,利用最值周期和关键点确定参数,kp_r1_5_6_01|kp_r1_5_6_02,数学运算|直观想象,图象求式|参数题,相位多解未结合图象,high,ready_for_teacher_review,user_pending
