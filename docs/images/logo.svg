@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Tetra">
+  <rect width="32" height="32" rx="8" fill="#0d0d0d"/>
+  <g fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15.8 5.5 6 21.5l7.6 5.2 12.6-6.1Z"/>
+    <path d="M15.8 5.5 13.6 26.7"/>
+    <path d="M6 21.5 26.2 20.6" stroke-width="1.4" stroke-dasharray="2 2.3"/>
+  </g>
+</svg>
