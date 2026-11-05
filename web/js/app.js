@@ -2,7 +2,7 @@
 
 import {
   $, DIFFICULTY_LABEL, FORCE_THINKING_FROM, GRADES, MODES, OFFLINE_MESSAGE, PURPOSES, THINKING, TYPE_LABEL,
-  agentConfig, describeConfig, el, setModelCatalog, thinkingFor,
+  agentConfig, describeConfig, el, mathText, setBlueprints, setModelCatalog, thinkingFor,
   formatWhen, greeting, legacyText, normalize, readStorage, renderMath, request,
   roleOfStage, segmented, svg, toast, writeStorage,
 } from './shared.js';
@@ -356,7 +356,7 @@ function modelTitle(model) {
   return model ? model.model : '没有可用的模型';
 }
 
-// 按钮上的文字包在 .chip-label 里：输入框窄的时候，没选的选项可以只留图标（见 app.css 的 @container）
+// 按钮上的文字包在 .chip-label 里：输入框窄的时候，选项可以只留图标（见下面的 fitComposer）
 function setChip(chip, parts, isSet = false) {
   chip.innerHTML = '';
   for (const part of parts) chip.append(typeof part === 'string' ? el('span', 'chip-label', part) : part);
@@ -374,9 +374,9 @@ function refreshComposer() {
   const f = state.form;
   const p = profile();
   const eff = effective();
-  // 出题选项：没选时只写是哪一项（考点不限、题型、难度、题量、用途），选了才写选的值并加深
-  const topicName = f.topic && f.topic.name.length > 10 ? `${f.topic.name.slice(0, 10)}…` : f.topic?.name;
-  setChip(ui.chips.kp, [f.topic ? `考查 ${topicName}` : '考点不限'], Boolean(f.topic));
+  // 出题选项：没选时只写是哪一项（考点不限、题型、难度、题量、用途），选了才写选的值并加深。
+  // 考点名太长时由样式截断（加省略号），不在这里截：英文界面要拿完整的名字去查译名
+  setChip(ui.chips.kp, [f.topic ? `考查 ${f.topic.name}` : '考点不限'], Boolean(f.topic));
   ui.chips.kp.title = f.topic?.label || '可以不选：不选时按年级挑一个考点；想指定就点这里选';
   setChip(ui.chips.type, [f.qtype ? TYPE_LABEL[f.qtype] : '题型'], Boolean(f.qtype));
   ui.chips.type.title = f.qtype ? '这次出题用的题型，出完恢复不选' : `不选就按个人设置：${TYPE_LABEL[eff.qtype]}；也可以直接在输入框里说`;
@@ -419,6 +419,49 @@ function refreshComposer() {
       : state.attachments.length ? '发送：看附件里的内容回答（比如解题），或者把里面的题存进题库'
         : typed ? '发送：要出题就出题，要组卷就组卷，其他的直接回答'
         : state.job ? '上一道题还在出' : `按下面的设置出题：${ui.taskLine.textContent.replace(/^将发送：/, '')}`;
+  scheduleFit();
+}
+
+// ---------- 输入框下方那一排：放不下一行时逐级收紧 ----------
+// 中文、英文，选了哪些选项，开没开右栏，宽度都不一样，所以量着来：先照常排，换行了就收一级再量。
+// 每一级收掉什么见 app.css 的 .fit-1～.fit-4。收到底还放不下（很窄的屏幕）才换行。
+const FIT_LEVELS = ['fit-1', 'fit-2', 'fit-3', 'fit-4'];
+let fitFrame = 0;
+let fitWidth = 0;
+
+function fitsOneRow(row) {
+  const tops = [...row.querySelectorAll('.chips > .chip, .composer-tools > :not([hidden])')]
+    .map((node) => node.getBoundingClientRect())
+    .filter((box) => box.width)
+    .map((box) => box.top);
+  return !tops.length || Math.max(...tops) - Math.min(...tops) < 8;
+}
+
+function fitComposer() {
+  const row = ui.composer.querySelector('.composer-row');
+  if (!row || !ui.composer.isConnected || !ui.composer.offsetWidth) return;
+  ui.composer.classList.remove(...FIT_LEVELS);
+  for (const level of FIT_LEVELS) {
+    if (fitsOneRow(row)) return;
+    ui.composer.classList.add(level);
+  }
+}
+
+// 英文界面的文字是在 MutationObserver 里换的（微任务），等到下一帧再量，量的就是换好以后的宽度
+function scheduleFit() {
+  cancelAnimationFrame(fitFrame);
+  fitFrame = requestAnimationFrame(fitComposer);
+}
+
+function watchComposerWidth() {
+  if (!('ResizeObserver' in window)) return;
+  new ResizeObserver(([entry]) => {
+    const width = Math.round(entry.contentRect.width);
+    if (width === fitWidth) return; // 只看宽度：收紧以后高度变了不用再量
+    fitWidth = width;
+    scheduleFit();
+  }).observe(ui.composer);
+  document.fonts?.ready.then(scheduleFit);
 }
 
 // 输入框里的选择只在这次打开期间记住；下次打开按个人设置里的偏好重新预选
@@ -1013,6 +1056,9 @@ function finderPopover() {
 
 // ---------- 模拟卷里的命题要求 ----------
 
+// 显示用排版写法，公式和题目里一样用 KaTeX 排（写完这一批调 renderMath）；这是题目内容，英文界面也不翻译
+const specTopic = (spec) => Object.assign(mathText('span', 'topic', spec.topic_tex || spec.topic), { translate: false });
+
 function shuffleSuggestions() {
   const pool = [...state.blueprints];
   for (let i = pool.length - 1; i > 0; i -= 1) {
@@ -1026,7 +1072,7 @@ function shuffleSuggestions() {
     button.type = 'button';
     button.append(
       el('span', 'where', spec.type_label),
-      el('span', 'topic', spec.topic),
+      specTopic(spec),
       el('span', 'use', '用这条'),
     );
     button.addEventListener('click', () => applyBlueprint(spec));
@@ -1034,6 +1080,7 @@ function shuffleSuggestions() {
     item.append(button);
     list.append(item);
   }
+  renderMath(list);
 }
 
 function applyBlueprint(spec) {
@@ -1064,12 +1111,13 @@ function renderBlueprintList() {
   for (const spec of items) {
     const button = el('button');
     button.type = 'button';
-    button.append(el('span', 'kind', spec.type_label), el('span', 'topic', spec.topic), dots(spec.target_difficulty));
+    button.append(el('span', 'kind', spec.type_label), specTopic(spec), dots(spec.target_difficulty));
     button.addEventListener('click', () => applyBlueprint(spec));
     const item = el('li');
     item.append(button);
     list.append(item);
   }
+  renderMath(list);
 }
 
 // ---------- 视图切换 ----------
@@ -1565,7 +1613,10 @@ function renderSheet(turn, { animate = true } = {}) {
     else if (snap.status === 'cancelled') ended = '已经停下，只留下了审过的题干。';
     else if (['stopped', 'failed'].includes(lane.status)) ended = `方案 ${lane.id} 已经停下，没有接着写答案和解析。`;
     key = `${snap.id}:${lane.id}:${version}:${ended ? 'ended' : 'live'}`;
-    note = `${several ? `方案 ${lane.id} 的` : ''}题干${version > 1 ? `第 ${version} 版` : ''}${snap.status === 'failed' ? '，没出成' : ''}`;
+    // 拼成几种完整的说法（英文界面按整句翻译）
+    if (several) note = version > 1 ? `方案 ${lane.id} 的题干第 ${version} 版` : `方案 ${lane.id} 的题干`;
+    else note = version > 1 ? `题干第 ${version} 版` : '题干';
+    if (snap.status === 'failed') note += '，没出成';
     build = () => buildSheet(lane.previews[version - 1].statement, { brief: snap.brief, meta: snap.meta, preview: true, ended });
   } else if (snap.status === 'failed' || snap.status === 'cancelled') {
     key = `${snap.id}:${snap.status}`;
@@ -2177,15 +2228,22 @@ function finishLive(snap) {
   else if (snap.status === 'cancelled') toast('已停下');
 }
 
+// 停止：服务端当场掐断正在进行的模型请求，等它收完尾才返回（一般零点几秒），这里马上刷新这一轮，不等下一次轮询
 async function stopJob(turn) {
-  if (!turn.jobId) return;
+  if (!turn.jobId || turn.stopping) return;
   const kind = turn.isImport ? 'imports' : turn.isPaper ? 'assemblies' : turn.isBatch ? 'batches' : 'jobs';
+  turn.stopping = true;
+  if (turn.stopBtn) turn.stopBtn.disabled = true;
   try {
     await request(`/api/${kind}/${turn.jobId}/stop`, { method: 'POST' });
-    toast('正在停下：手头这次模型调用结束后就停');
   } catch (error) {
     toast(error.message);
+    return;
+  } finally {
+    turn.stopping = false;
+    if (turn.stopBtn) turn.stopBtn.disabled = false;
   }
+  if (state.job?.id === turn.jobId) poll();
 }
 
 function openBank(focus = null) {
@@ -2250,7 +2308,7 @@ function renderSessions() {
       if (!session.papers && session.last_status === 'failed') meta.append(el('span', 'flag', '没出成'));
       else if (!session.papers && session.last_status === 'cancelled') meta.append(el('span', 'flag', '已停下'));
     }
-    const title = el('span', 'title');
+    const title = el('span', 'title compact-math'); // 标题是第一句话时可能带公式
     // 置顶的对话标题前有一个小图钉
     if (session.pinned_at) title.insertAdjacentHTML('afterbegin', svg('pin').replace('<svg ', '<svg class="pin-mark" '));
     title.append(sessionTitle(session));
@@ -2269,6 +2327,7 @@ function renderSessions() {
     item.append(button);
     ui.historyList.append(item);
   }
+  renderMath(ui.historyList);
 }
 
 // 对话的名字：你改过的 → 第一句话或试卷名 → 第一道题考的知识点
@@ -2902,6 +2961,7 @@ async function init() {
     },
   });
   ui.heroSlot.append(ui.composer);
+  watchComposerWidth();
   renderGreeting();
   await checkHealth();
   await loadProfile();
@@ -2909,6 +2969,7 @@ async function init() {
     const [tree, blueprints] = await Promise.all([request('/api/curriculum'), request('/api/blueprints')]);
     state.tree = tree;
     state.blueprints = blueprints;
+    setBlueprints(blueprints);
     indexTree(tree);
   } catch (error) {
     toast(`知识点目录没加载出来：${error.message}`);

@@ -1,7 +1,7 @@
 // 题目：把题干、答案和解析排成教辅上印的样子。
 // 这是给老师直接用的，只放题目本身；审题、复核这些过程信息留在中间的出题过程里。
 
-import { DIFFICULTY_LABEL, TYPE_LABEL, el, mathText, normalize, pips } from './shared.js';
+import { DIFFICULTY_LABEL, TYPE_LABEL, autoMath, el, mathText, normalize, pips } from './shared.js';
 
 export function optionColumns(options) {
   const longest = Math.max(
@@ -22,7 +22,7 @@ function curriculumLabel(curriculum) {
 function listOrDash(items) {
   if (!items || !items.length) return el('p', '', '—');
   const list = el('ul');
-  for (const item of items) list.append(mathText('li', '', item));
+  for (const item of items) list.append(mathText('li', '', autoMath(item)));
   return list;
 }
 
@@ -90,7 +90,7 @@ export function buildSheet(draft, { brief = {}, meta = {}, preview = false, reve
   // 只有没整理过的完整推导（解析详略选"详细"时）才按步骤编号
   if (draft.solution_method) {
     const method = mathText('p', 'method print', '');
-    method.append(el('b', '', '分析　'), document.createTextNode(draft.solution_method));
+    method.append(el('b', '', '分析　'), document.createTextNode(autoMath(draft.solution_method)));
     paper.append(method);
   }
   if (examStyle(draft)) {
@@ -116,7 +116,7 @@ export function buildSheet(draft, { brief = {}, meta = {}, preview = false, reve
     full.append(summary);
     if (draft.full_solution_method) {
       const method = mathText('p', 'method print', '');
-      method.append(el('b', '', '思路　'), document.createTextNode(draft.full_solution_method));
+      method.append(el('b', '', '思路　'), document.createTextNode(autoMath(draft.full_solution_method)));
       full.append(method);
     }
     const list = el('ol', 'steps-print print');
@@ -127,7 +127,7 @@ export function buildSheet(draft, { brief = {}, meta = {}, preview = false, reve
 
   const notes = el('section', 'paper-notes');
   const intent = el('div');
-  intent.append(el('h4', '', '命题意图'), mathText('p', '', draft.authoring_intent || '—'));
+  intent.append(el('h4', '', '命题意图'), mathText('p', '', autoMath(draft.authoring_intent) || '—'));
   const methods = el('div');
   methods.append(el('h4', '', '考查方法'), listOrDash(draft.assessed_methods));
   const mistakes = el('div');

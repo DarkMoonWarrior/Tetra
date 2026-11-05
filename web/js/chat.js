@@ -2,7 +2,7 @@
 // 回答是 Markdown 加 LaTeX 公式：这里只排常用的几种（段落、列表、加粗、标题、代码、引用、独立公式），
 // 全部用 DOM 节点拼出来，不用 innerHTML，模型写出的尖括号不会被当成网页标签。公式交给 KaTeX。
 
-import { AVATAR, el, renderMath, spin, svg, toast } from './shared.js';
+import { AVATAR, el, renderMath, spin, svg, toast, typesetTopic } from './shared.js';
 
 // 你那句话上面的附件：图片显示缩略图，PDF、文本文件显示图标、名字和页数
 export function attachmentStrip(list) {
@@ -197,8 +197,9 @@ export class ChatTurn {
     this.task = el('div', 'task-card');
     if (attachments.length) this.task.append(attachmentStrip(attachments));
     // 你自己写的话：不翻译（界面切成英文时也保持原样）
-    if (text) this.task.append(Object.assign(el('p', 'ask', text), { translate: false }));
+    if (text) this.task.append(Object.assign(el('p', 'ask', typesetTopic(text)), { translate: false }));
     else if (!attachments.length) this.task.append(el('p', 'ask', ''));
+    renderMath(this.task);
     const reply = el('section', 'reply');
     reply.setAttribute('aria-live', 'polite');
     this.avatar = el('span', 'reply-avatar');

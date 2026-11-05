@@ -1,7 +1,7 @@
 // 批量出题：一次出好几道同类题，在对话里是一轮，列出每一道的进度；点一行在右栏看那道题。
 // 正在出时读 /api/batches/{id} 的概况；出完（或者重新打开对话）时按出题记录显示。
 
-import { AVATAR, ROLES, describeConfig, describeStage, el, formatClock, formatTokens, legacyText, renderMath, spin } from './shared.js';
+import { AVATAR, ROLES, autoMath, describeConfig, describeStage, el, formatClock, formatTokens, legacyText, renderMath, spin, typesetTopic } from './shared.js';
 
 const STATE_TEXT = { waiting: '排队中', queued: '排队中', running: '出题中', succeeded: '出好了', failed: '没出成', cancelled: '已停下' };
 const oneLine = (text) => String(text || '').replace(/\$\$/g, '$').replace(/\s*\n+\s*/g, ' ');
@@ -136,17 +136,18 @@ export class BatchTurn {
   renderTask() {
     const { brief = {}, meta = {}, config } = this.request || {};
     this.task.innerHTML = '';
-    if (meta.said) this.task.append(el('p', 'said', meta.said));
+    if (meta.said) this.task.append(el('p', 'said', typesetTopic(meta.said)));
     else if (meta.follow_up) this.task.append(el('p', 'lead', meta.follow_up));
     const text = String(brief.request_text || '').replace(/^请出一道/, `请出 ${this.count} 道`);
     this.task.append(el('p', 'ask', text));
-    if (meta.note && meta.note !== meta.said) this.task.append(el('p', 'extra', meta.note));
+    if (meta.note && meta.note !== meta.said) this.task.append(el('p', 'extra', autoMath(typesetTopic(meta.note))));
     const tags = el('div', 'config');
     tags.append(el('span', '', `一次出 ${this.count} 道`));
     if (meta.knowledge_label) tags.append(el('span', '', meta.knowledge_label));
     else if (meta.open_topic) tags.append(el('span', '', '考点不限'));
     for (const tag of describeConfig(config, this.actions.models())) tags.append(el('span', '', tag));
     this.task.append(tags);
+    renderMath(this.task);
   }
 
   render({ live = false } = {}) {
@@ -154,6 +155,7 @@ export class BatchTurn {
     const items = this.items();
     const done = items.filter((item) => item.status === 'succeeded').length;
     const failed = items.filter((item) => ['failed', 'cancelled'].includes(item.status)).length;
+    const stopped = items.some((item) => item.status === 'cancelled'); // 是你点了停止，不算"没出成"
     const running = this.running;
     spin(this.avatar.firstElementChild, running); // 这一批还在出时头像一直转
     const totals = this.snapshot?.totals || {
@@ -166,7 +168,8 @@ export class BatchTurn {
     this.tokens.textContent = formatTokens(totals.tokens);
     this.title.textContent = running
       ? `正在出 ${this.count} 道题（出好 ${done} 道）`
-      : failed && done ? `出好 ${done} 道，${failed} 道没出成` : done ? `${done} 道题都出好了` : '这一批没出成';
+      : stopped ? (done ? `已停下，出好 ${done} 道` : '已停下')
+        : failed && done ? `出好 ${done} 道，${failed} 道没出成` : done ? `${done} 道题都出好了` : '这一批没出成';
     this.note.textContent = running
       ? `同时出 ${this.snapshot.parallel || 2} 道；每道题都单独审题、解题、复核。后开始的题会避开前面已经写出的题干，不会出成一样的题。点一行可以在右侧看那道题。`
       : '';
@@ -174,7 +177,7 @@ export class BatchTurn {
     this.bar.hidden = !running;
     this.barFill.style.width = `${Math.round(((done + failed) / Math.max(1, this.count)) * 100)}%`;
     this.renderRows(items);
-    this.renderOutcome(running, done, failed);
+    this.renderOutcome(running, done, failed, stopped);
   }
 
   renderRows(items) {
@@ -224,8 +227,8 @@ export class BatchTurn {
     this.time.textContent = formatClock(seconds);
   }
 
-  renderOutcome(running, done, failed) {
-    const key = `${running}:${done}:${failed}`;
+  renderOutcome(running, done, failed, stopped) {
+    const key = `${running}:${done}:${failed}:${stopped}`;
     if (running) {
       this.outcome.hidden = true;
       this.outcomeKey = '';
@@ -233,12 +236,15 @@ export class BatchTurn {
     }
     if (this.outcomeKey === key) return;
     this.outcomeKey = key;
-    this.outcome.className = `outcome${done ? ' ok' : ' bad'}`;
+    this.outcome.className = `outcome${done ? ' ok' : stopped ? '' : ' bad'}`;
     this.outcome.hidden = false;
     this.outcome.innerHTML = '';
-    this.outcome.append(el('p', '', done
-      ? `出好的 ${done} 道都审题、复核过，已经收进题库。${failed ? `另外 ${failed} 道没出成，可以再出一批补上。` : ''}`
-      : '这一批一道也没出成。可以换一个考点，或者降一档难度再试。'));
+    let summary = '这一批一道也没出成。可以换一个考点，或者降一档难度再试。';
+    if (done) {
+      const rest = stopped ? `另外 ${failed} 道没有出。` : failed ? `另外 ${failed} 道没出成，可以再出一批补上。` : '';
+      summary = `出好的 ${done} 道都审题、复核过，已经收进题库。${rest}`;
+    } else if (stopped) summary = '已经停下，这次没有生成题目。';
+    this.outcome.append(el('p', '', summary));
     const actions = el('div', 'followups');
     if (done) actions.append(button(`把这 ${done} 道组成试卷`, 'followup', () => this.actions.makePaper(this)));
     actions.append(button(`再出 ${this.count} 道`, 'followup', () => this.actions.followUp(this, 'again')));

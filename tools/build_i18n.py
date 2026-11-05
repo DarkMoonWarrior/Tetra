@@ -2,6 +2,7 @@
 
 1. 提取：从 web/js/*.js、web/index.html 和后端几个会把文字显示到界面上的文件里，找出带中文的字符串。
    JS 的模板字符串 `出好 ${done} 道` 记成"出好 {0} 道"（${} 里的字符串另外提取）；Python 的 f-string 同样处理。
+   两版教材知识树里册、章、节、知识点的名称也一起翻（考点选择、题库分类、对话标题都显示它们）。
 2. 翻译：已经翻过的（tools/i18n_en.json）直接用；新的请接入的模型批量翻译（带术语表，占位符 {0}{1} 原样保留）。
    想改某一条的译法：写进 tools/i18n_overrides.json（{"中文": "English"}），它优先。
 3. 生成：没有占位符的放进 exact（整句查表），有占位符的放进 patterns（按模板匹配，变量部分再翻译）。
@@ -28,7 +29,11 @@ CACHE = ROOT / "tools" / "i18n_en.json"
 OVERRIDES = ROOT / "tools" / "i18n_overrides.json"
 OUTPUT = ROOT / "web" / "js" / "i18n-en.js"
 # 后端里会显示到界面上的文字（出题过程的说明、报错）：只取不太长的字符串，提示词这类长文本不要
-BACKEND = ["jobs.py", "assemble.py", "importer.py", "server.py", "attachments.py", "assistant.py", "context.py", "bank.py", "deepseek.py"]
+BACKEND = [
+    "jobs.py", "assemble.py", "importer.py", "server.py", "attachments.py", "assistant.py", "context.py", "bank.py",
+    "deepseek.py", "team.py", "presets.py", "models.py", "model_config.py", "profile.py", "answer_key.py", "figures.py",
+]
+CURRICULA = sorted((ROOT / "data" / "curriculum").glob("*.csv"))
 BACKEND_MAX = 90
 
 
@@ -145,15 +150,33 @@ def _html_strings(source: str) -> list[str]:
 
 def _py_strings(source: str) -> list[str]:
     out = []
-    for prefix, quote, body in re.findall(r'(\b[fFrRbB]{0,2})("|\')((?:\\.|(?!\2).)*)\2', source):
+    # 文档字符串、三引号的长提示词、整行注释都不是界面文字，先去掉
+    source = re.sub(r'("""|\'\'\')[\s\S]*?\1', '""', source)
+    source = re.sub(r"(?m)^\s*#.*$", "", source)
+    # 前缀（f、r、b）可有可无；以前写成 \b[fF…]{0,2}，没有前缀的字符串前面是空格、括号时 \b 不成立，只提到了 f-string
+    for prefix, quote, body in re.findall(r'(?:\b([fFrRbB]{1,2}))?("|\')((?:\\.|(?!\2).)*)\2', source):
         if "f" in prefix.lower():
             slot = iter(range(100))
             body = re.sub(r"\{[^{}]*\}", lambda _m: f"{{{next(slot)}}}", body)
         elif "{" in body:
             continue
-        if len(body) <= BACKEND_MAX:
+        # 写日志用的（"命题任务 %s 出错"）不显示在界面上
+        if len(body) <= BACKEND_MAX and "%s" not in body and "%d" not in body:
             out.append(body)
     return out
+
+
+def _curriculum_names() -> list[str]:
+    """两版教材知识树里册、章、节、知识点的名称。"""
+    import csv
+
+    names: dict[str, None] = {}
+    for path in CURRICULA:
+        with path.open(encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                if row.get("node_type") in ("volume", "chapter", "section", "knowledge_point") and row.get("name"):
+                    names[row["name"].strip()] = None
+    return list(names)
 
 
 def extract() -> list[str]:
@@ -167,7 +190,13 @@ def extract() -> list[str]:
         found[text] = None
     for name in BACKEND:
         for text in _py_strings((ROOT / "mingti" / name).read_text(encoding="utf-8")):
+            core = text.strip()
+            # 后端里的提示词片段、正则不是界面文字
+            if core.startswith(("你是", "请按", "请根据")) or "JSON" in core or "\\n" in core or core.count("|") >= 2:
+                continue
             found[text] = None
+    for text in _curriculum_names():
+        found[text] = None
     keep = []
     for text in found:
         core = text.strip()
@@ -196,6 +225,9 @@ INSTRUCTIONS = f"""把下面这些界面文字从中文翻译成英文，用在�
 - {{0}}、{{1}} 这类占位符原样保留，可以按英文语序调整位置，但每个占位符都要出现、不能改编号。
 - 型号名（deepseek-flash 等）、文件格式、数学符号、LaTeX、标点以外的英文原样保留。
 - 中文标点换成英文标点。
+- 有些条目是高中数学教材的章、节和知识点名称（比如"集合的基本运算""等差数列前n项和""函数y等于Asinωx加φ"）：
+  译成教材目录式的简短英文数学术语，只有第一个词首字母大写（Basic operations on sets；Sum of the first n terms of
+  an arithmetic sequence；The function y = A sin(ωx + φ)），文字写出来的数学式（"y等于…加…"）还原成式子。
 {GLOSSARY}
 输入 items 是 [{{"id": 编号, "zh": 中文}}]，只输出 JSON：{{"items": [{{"id": 编号, "en": "English"}}]}}"""
 

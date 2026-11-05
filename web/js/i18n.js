@@ -57,14 +57,28 @@ function compile([zh, en]) {
   return { re: new RegExp(`${source}$`), order, en, weight: zh.replace(/\{\d+\}/g, '').length };
 }
 
+// 太宽的模板不用：没有中文的（比如"{0}，{1}"），以及两头都是空、中间只有两三个字的（比如"{0}题干{1}{2}"，
+// 会把"构思题干与选项"翻成"构思 stem 与选项"）
+function usable(zh) {
+  const fixed = zh.replace(/\{\d+\}/g, '');
+  const cjk = (fixed.match(/[㐀-鿿]/g) || []).length;
+  if (!cjk) return false;
+  return !(/^\{\d+\}/.test(zh) && /\{\d+\}$/.test(zh) && cjk <= 3);
+}
+
 export function loadDictionary(dictionary) {
   exact = new Map(Object.entries(dictionary.exact || {}));
   patterns = (dictionary.patterns || [])
-    .filter(([zh]) => CJK.test(zh.replace(/\{\d+\}/g, '')))
+    .filter(([zh]) => usable(zh))
     .map(compile)
     // 固定文字多的模板先试，更准；一样多的，空位少的先试（"{0}{1}{2}"那种会把两个词并成一个空）
     .sort((a, b) => b.weight - a.weight || a.order.length - b.order.length);
 }
+
+// 前面：数字、空格、圆点、井号；后面：空格、省略号、句号、冒号、问号、感叹号、逗号、分号
+const AFFIX = /^([\d\s.•·#-]*)([\s\S]*?)([\s…。.:：!！?？,，、;；]*)$/;
+const PUNCT = { '。': '.', '：': ':', '！': '!', '？': '?', '，': ',', '、': ',', '；': ';' };
+const punctuation = (text) => text.replace(/[。：！？，、；]/g, (mark) => PUNCT[mark]);
 
 // 中文英文之间的句子：英文句子之间加一个空格（换行的不加）
 function joinSentences(pieces) {
@@ -78,6 +92,12 @@ export function translate(text, depth = 0) {
   const core = text.trim();
   const hit = exact.get(core);
   if (hit !== undefined) return lead + hit + tail;
+  // 前后带着编号、省略号、冒号这类字符（"1 基础""构思题干与选项…""考点："）：去掉再查，整个查到了再接回去
+  const affix = AFFIX.exec(core);
+  if (affix && (affix[1] || affix[3]) && affix[2]) {
+    const inner = translate(affix[2], depth + 1);
+    if (!CJK.test(inner)) return lead + affix[1] + inner + punctuation(affix[3]) + tail;
+  }
   // 几句话连在一起（比如按钮提示"按下面的设置出题：……。考点不限，……。"）：先一句一句查，句句都换掉了就用这个；
   // 不然模板会把后面几句都塞进最后一个空里
   const sentences = core.split(/(?<=[。！？\n])/).filter(Boolean);
@@ -91,10 +111,10 @@ export function translate(text, depth = 0) {
     return lead + out + tail;
   }
   if (each && each.some((sentence, i) => sentence !== sentences[i])) return lead + joinSentences(each) + tail;
-  // 用顿号、逗号、分号、斜杠隔开的几段（比如"高一，课后作业"）：分开查
-  const pieces = core.split(/([，、；/·]\s*)/);
+  // 用顿号、逗号、分号、斜杠、›隔开的几段（比如"高一，课后作业""必修第一册 › 集合"）：分开查
+  const pieces = core.split(/(\s*[，、；/·›]\s*)/);
   if (pieces.length > 1) {
-    const done = pieces.map((piece, i) => (i % 2 ? { '，': ', ', '、': ', ', '；': '; ', '/': '/', '·': ' · ' }[piece.trim()] ?? piece : translate(piece, depth + 1)));
+    const done = pieces.map((piece, i) => (i % 2 ? { '，': ', ', '、': ', ', '；': '; ', '/': '/', '·': ' · ', '›': ' › ' }[piece.trim()] ?? piece : translate(piece, depth + 1)));
     if (done.some((piece, i) => i % 2 === 0 && piece !== pieces[i])) return lead + done.join('') + tail;
   }
   return text;

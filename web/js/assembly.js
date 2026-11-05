@@ -112,7 +112,10 @@ export class PaperTurn {
   render({ live = false } = {}) {
     const snap = this.snapshot;
     if (!snap) return;
-    if (!this.task.childElementCount) this.task.append(el('p', 'ask', snap.text || ''));
+    if (!this.task.childElementCount) {
+      this.task.append(el('p', 'ask', snap.text || ''));
+      renderMath(this.task);
+    }
     const running = this.running;
     spin(this.avatar.firstElementChild, running);
     const totals = snap.totals || {};

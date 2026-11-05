@@ -172,7 +172,7 @@ body:not(.is-idle) .geometry { opacity: 0.45; }
 .history-item:hover { background: var(--hover); }
 .history-item[aria-current="true"] { background: var(--active); }
 .history-item .title { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.history-item .meta { display: flex; gap: 8px; font-size: 12px; color: var(--ink-3); }
+.history-item .meta { display: flex; gap: 8px; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; }
 .history-item .meta .num { font-family: var(--font-num); }
 .history-item .meta .flag { color: var(--red); }
 .history-item.live .title { display: flex; align-items: center; gap: 8px; }
@@ -259,17 +259,21 @@ body.is-idle .hero { margin-block: auto; }
 .link-btn { border: 0; background: none; padding: 2px 0; color: var(--ink); font-size: 13.5px; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; white-space: nowrap; }
 .link-btn:hover { text-decoration-color: var(--ink); }
 .suggest-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+/* 每行一样高（够放一个分数），换一批时列表和上面的输入框不跳；题型、内容、"用这条"一个字号 */
 .suggestion {
-  width: 100%;
-  display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 14px; align-items: baseline;
+  width: 100%; min-height: 58px;
+  display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 14px; align-items: center;
   border: 0; border-bottom: 1px solid var(--line); background: none; text-align: left;
-  padding: 10px 8px;
+  padding: 6px 8px; font-size: 14.5px;
 }
 .suggestion:hover { background: var(--veil-hover); }
-.suggestion .where { font-size: 12.5px; color: var(--ink-3); }
-.suggestion .topic { font-size: 14.5px; min-width: 0; }
-.suggestion .use { font-size: 13px; color: var(--ink-2); visibility: hidden; }
+.suggestion .where { color: var(--ink-3); }
+.suggestion .topic { min-width: 0; }
+.suggestion .use { color: var(--ink-2); visibility: hidden; }
 .suggestion:hover .use, .suggestion:focus-visible .use { visibility: visible; }
+/* 英文的题型名（Multiple choice）比三个汉字宽，第一列放宽，不折成两行 */
+.suggestion .where, .bp-list .kind { white-space: nowrap; }
+:root[lang="en"] .suggestion { grid-template-columns: 112px minmax(0, 1fr) auto; }
 
 /* ---------- 输入框 ---------- */
 /* 照常见 agent 的输入框：上面写要求，下面一行工具栏——左边是出题选项（带图标的描边小胶囊），
@@ -281,8 +285,6 @@ body.is-idle .hero { margin-block: auto; }
   border: 1px solid var(--line); border-radius: 26px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 14px 36px -18px rgba(0, 0, 0, 0.22);
   transition: border-color 0.2s, box-shadow 0.2s;
-  /* 按输入框自己的宽度调整下方那一排按钮（见下面的 @container） */
-  container: composer / inline-size;
 }
 .composer:focus-within { border-color: var(--line-strong); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 18px 44px -18px rgba(0, 0, 0, 0.3); }
 .composer textarea {
@@ -587,11 +589,20 @@ body.is-idle .hero { margin-block: auto; }
 
 /* 输入框下方的出题选项：没选时是浅色的项目名，选了才写值、加深 */
 .composer .chips .chip.set { border-color: var(--ink-3); background: var(--rail); color: var(--ink); }
-/* 输入框窄的时候（比如右边开着题目），没选的选项只留图标（鼠标停上去有说明），整排仍放在一行，不上下错开 */
-@container composer (max-width: 720px) {
-  .chips .chip:not(.set) > .chip-label { display: none; }
-  .chips .chip:not(.set) { padding: 0 8px; }
-}
+/* 放不下一行时逐级收紧，整排仍放在一行，不上下错开（量宽度的是 app.js 的 fitComposer）：
+   fit-1 没选的选项只留图标（鼠标停上去有说明）；fit-2 模型按钮去掉"思考"两个字，只留档位；
+   fit-3 上下文只留圆环，模型按钮去掉小箭头；fit-4 选了的选项也只留图标（加深的边框表示选过） */
+.composer.fit-1 .chips .chip:not(.set) > .chip-label { display: none; }
+.composer.fit-1 .chips .chip:not(.set) { padding: 0 8px; }
+.composer.fit-2 .chip-think > span, :root[lang="en"] .chip-think > span { display: none; } /* 英文的 Reasoning 太长，一直只留档位 */
+.composer.fit-3 .composer-row { gap: 4px; }
+.composer.fit-3 .chips, .composer.fit-3 .composer-tools { gap: 2px; }
+.composer.fit-3 .ctx-chip > span, .composer.fit-3 #modelChip .caret { display: none; }
+.composer.fit-3 #modelChip { padding-right: 9px; }
+.composer.fit-4 .chips .chip > .chip-label { display: none; }
+.composer.fit-4 .chips .chip { padding: 0 8px; }
+/* 考点名太长就截断（完整路径在鼠标提示里） */
+.composer #kpChip .chip-label { max-width: 15em; overflow: hidden; text-overflow: ellipsis; }
 
 /* 上下文：输入框右下角一个小圆环加百分比，点开是用量、说明和"压缩上下文" */
 .composer .ctx-chip { border-color: transparent; padding: 0 8px; gap: 5px; font: 12.5px/1 var(--font-num); color: var(--ink-3); }
@@ -787,6 +798,8 @@ body.is-idle .hero { margin-block: auto; }
 .step.active .step-icon { border-color: var(--ink); border-right-color: transparent; animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .step-name { font-size: 14px; font-weight: 600; line-height: 24px; white-space: nowrap; }
+/* 英文的角色名（Composer、Illustrator）比三个汉字宽，第二列放宽，免得压到后面的说明 */
+:root[lang="en"] .step { grid-template-columns: 22px 86px minmax(0, 1fr) auto; }
 .step-detail {
   min-width: 0; padding-top: 1px;
   font-size: 14px; line-height: 1.6; color: var(--ink-2);
@@ -897,15 +910,16 @@ body.is-idle .hero { margin-block: auto; }
 .pips i.on { background: var(--ink); border-color: var(--ink); }
 .paper-path { margin: 6px 0 18px; font-size: 12.5px; color: var(--ink-3); }
 .print { font-family: var(--font-serif); font-size: 17px; line-height: 2; color: var(--print-ink); overflow-wrap: break-word; }
-.print .katex { font-size: 1.08em; }
+/* 公式字号全站统一：KaTeX 默认放大到 1.21 倍，配中文明显偏大；1.08 倍时数字、字母和旁边的中文看起来一样大 */
+.katex { font-size: 1.08em; }
 /* 行内分数排成和正文一样大（shared.js 的 displayStyle），比一行字高；
    含分数的那一段上下各留一点，相邻两行的分数不会碰在一起 */
 .katex .katex-base:has(.mfrac) { margin-block: 0.2em; }
-.katex-display .katex-base:has(.mfrac), .compact-math .katex-base:has(.mfrac) { margin-block: 0; }
+.katex-display .katex-base:has(.mfrac), .compact-math .katex-base:has(.mfrac),
+.suggestion .katex-base:has(.mfrac), .bp-list .katex-base:has(.mfrac) { margin-block: 0; }
 /* 挪进公式里的中文标点（shared.js 的 gluePunctuation）：字体字号调回和所在段落的正文一样；
    用宋体排题目的地方在下面把 --math-cjk-font 设成宋体 */
-.katex .cjk_fallback { font-family: var(--math-cjk-font, var(--font-ui)); font-size: calc(1em / 1.21); }
-.print .katex .cjk_fallback { font-size: calc(1em / 1.08); }
+.katex .cjk_fallback { font-family: var(--math-cjk-font, var(--font-ui)); font-size: calc(1em / 1.08); }
 .print, .bank-stem, .math-preview, .stem-line { --math-cjk-font: var(--font-serif); }
 /* 很长的公式只让公式自己横向滚动，不把整栏撑出横向滚动条 */
 .paper .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
@@ -1097,8 +1111,8 @@ body.is-idle .hero { margin-block: auto; }
   padding: 8px 10px; border-radius: 10px; font-size: 14px;
 }
 .bp-list button:hover { background: var(--hover); }
-.bp-list .where { font-size: 12.5px; color: var(--ink-3); }
-.bp-list .kind { font-size: 12.5px; color: var(--ink-2); }
+.bp-list .kind { color: var(--ink-2); }
+:root[lang="en"] .bp-list button { grid-template-columns: 112px minmax(0, 1fr) auto; }
 .bp-empty { padding: 12px 10px; font-size: 13px; color: var(--ink-3); }
 
 /* ---------- 个人设置 ---------- */
@@ -1276,19 +1290,19 @@ body.rail-collapsed .thread-scroll { padding-top: 60px; }
   .thread-scroll { padding: 60px 16px 12px; }
   .dock { padding: 6px 12px 12px; }
   .hero-title { font-size: 27px; }
-  .suggestion { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .suggestion, :root[lang="en"] .suggestion { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .suggestion .use { display: none; }
   .reply { grid-template-columns: minmax(0, 1fr); }
   .reply-avatar { display: none; }
   .reply-stats { margin-left: 0; width: 100%; }
-  .step { grid-template-columns: 22px minmax(0, 1fr); }
+  .step, :root[lang="en"] .step { grid-template-columns: 22px minmax(0, 1fr); }
   .step-detail, .step-meta { grid-column: 2; }
   .paper { padding: 20px 16px 24px; }
   .options.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .paper-notes { grid-template-columns: minmax(0, 1fr); }
   .finder-cols { grid-template-columns: minmax(0, 1fr); height: auto; }
   .finder-col { max-height: 160px; border-right: 0; }
-  .bp-list button { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .bp-list button, :root[lang="en"] .bp-list button { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .settings { width: 100vw; height: 100vh; max-width: none; max-height: none; border-radius: 0; }
   .settings-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .settings-nav { padding: 12px 10px 8px; border-right: 0; border-bottom: 1px solid var(--line); }

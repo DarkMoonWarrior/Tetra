@@ -1,7 +1,7 @@
 // 聊天里把附件中的题存进题库：先识别题目，原题没有解析的由助手补写，做成一张核对卡片；
 // 你勾选、点"存入题库"之后才存。正在做时读 /api/imports/{id}；做完（或重新打开对话）时按存进对话的记录显示。
 
-import { AVATAR, DIFFICULTY_LABEL, TYPE_LABEL, el, mathText, renderMath, request, spin, toast } from './shared.js';
+import { AVATAR, DIFFICULTY_LABEL, TYPE_LABEL, autoMath, el, mathText, renderMath, request, spin, toast } from './shared.js';
 import { attachmentStrip } from './chat.js';
 
 function button(text, className, onClick) {
@@ -84,6 +84,7 @@ export class ImportTurn {
     if (this.task.childElementCount) return;
     if (source.attachments?.length) this.task.append(attachmentStrip(source.attachments));
     this.task.append(Object.assign(el('p', 'ask', source.text || '把附件里的题存进题库'), { translate: !source.text }));
+    renderMath(this.task);
   }
 
   render({ live = false } = {}) {
@@ -185,7 +186,7 @@ export class ImportTurn {
       steps.append(el('summary', '', q.generated_solution ? `解析（助手补写，${q.solution_steps.length} 行）` : `解析（${q.solution_steps.length} 行）`));
       const body = el('div', '');
       body.translate = false;
-      if (q.solution_method) body.append(mathText('p', 'import-q-method', `【分析】${q.solution_method}`));
+      if (q.solution_method) body.append(mathText('p', 'import-q-method', `【分析】${autoMath(q.solution_method)}`));
       for (const step of q.solution_steps) body.append(mathText('p', '', step));
       steps.append(body);
       main.append(steps);

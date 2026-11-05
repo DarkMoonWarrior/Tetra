@@ -1,7 +1,7 @@
 // 对话里的一轮：你的要求，加上助手的回复（进度、结果、过程记录、调用明细）。
 // 一个对话可以连着出好几道题，每道题是一轮，从上往下排。
 
-import { AVATAR, DETAIL, describeConfig, el, formatClock, formatTokens, legacyText, renderMath, spin } from './shared.js';
+import { AVATAR, DETAIL, autoMath, describeConfig, el, formatClock, formatTokens, legacyText, renderMath, spin, typesetTopic } from './shared.js';
 import { Steps, WorkLog, renderCalls } from './progress.js';
 
 
@@ -114,17 +114,18 @@ export class Turn {
     const { brief = {}, meta = {}, config } = this.snapshot;
     this.task.innerHTML = '';
     // said：用户在输入框里说的原话（助手判断是出题时）；下面是助手整理成的出题要求
-    if (meta.said) this.task.append(el('p', 'said', meta.said));
+    if (meta.said) this.task.append(el('p', 'said', typesetTopic(meta.said)));
     else if (meta.follow_up) this.task.append(el('p', 'lead', meta.follow_up));
     this.task.append(el('p', 'ask', brief.request_text || ''));
     const note = meta.note ?? (meta.follow_up ? '' : brief.additional_constraints);
-    if (note && note !== meta.said) this.task.append(el('p', 'extra', note));
+    if (note && note !== meta.said) this.task.append(el('p', 'extra', autoMath(typesetTopic(note))));
     const tags = el('div', 'config');
     if (meta.knowledge_label) tags.append(el('span', '', meta.knowledge_label));
     else if (meta.open_topic) tags.append(el('span', '', '考点不限'));
     if (meta.detail && meta.detail !== 'standard' && DETAIL[meta.detail]) tags.append(el('span', '', `解析${DETAIL[meta.detail].name}`));
     for (const tag of describeConfig(config, this.actions.models())) tags.append(el('span', '', tag));
     if (tags.childElementCount) this.task.append(tags);
+    renderMath(this.task);
   }
 
   // live：正在出的这一道（显示"停止"）；replaying：回放中

@@ -1,5 +1,9 @@
 // 公共常量与小工具
 
+import { autoMath } from './automath.js';
+
+export { autoMath };
+
 export const TYPE_LABEL = {
   single_choice: '单选题',
   multiple_choice: '多选题',
@@ -290,6 +294,19 @@ export function mathText(tag, className, text) {
   node.style.whiteSpace = 'pre-line';
   node.textContent = text || '';
   return node;
+}
+
+// 模拟卷的命题要求有两种写法：topic 是纯文本（填进输入框、搜索、发给模型），topic_tex 是排版写法（公式在 $…$ 里）。
+// 任务卡片上的"题目内容：……"来自输入框，是纯文本，显示时换回排版写法
+let topicTex = new Map();
+export function setBlueprints(specs) {
+  topicTex = new Map(specs.filter((spec) => spec.topic_tex).flatMap((spec) => [
+    [spec.topic, spec.topic_tex],
+    [spec.topic.replaceAll('e^x', 'eˣ'), spec.topic_tex], // 早期的记录里写的是 eˣ
+  ]));
+}
+export function typesetTopic(text) {
+  return String(text ?? '').replace(/(题目内容：)(.+)/g, (all, lead, topic) => lead + (topicTex.get(topic) || autoMath(topic)));
 }
 
 // 行内公式也按试卷的排法用"显示"样式：分数和正文一样大（相当于 \dfrac），

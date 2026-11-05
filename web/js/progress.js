@@ -2,7 +2,7 @@
 // 还有过程记录（审题意见、退回原因、验算结果）和每一次模型调用的明细。
 
 import {
-  ROLES, describeStage, el, formatClock, formatTokens, legacyText, mathText, modelLabel, renderMath, svg,
+  ROLES, autoMath, describeStage, el, formatClock, formatTokens, legacyText, mathText, modelLabel, renderMath, svg,
 } from './shared.js';
 
 export const LANE_STATE = { waiting: '等待中', running: '进行中', won: '已采用', stopped: '已停下', failed: '没出成' };
@@ -100,7 +100,7 @@ export class Steps {
 
       let text;
       if (running.length) text = `${describeStage(running[running.length - 1].stage).text}…`;
-      else if (said.length) text = legacyText(said[said.length - 1].text);
+      else if (said.length) text = autoMath(legacyText(said[said.length - 1].text));
       else if (mine.length) text = describeStage(mine[mine.length - 1].stage).text;
       else text = ROLES[role].todo;
       if (parts.text !== text) {
@@ -160,10 +160,10 @@ export class WorkLog {
     head.append(el('time', 'log-time', formatClock(event.at)));
     if (multiLane) head.append(el('span', 'log-lane', `方案 ${event.lane}`));
     head.append(el('span', 'log-role', ROLES[event.role]?.name || ''));
-    item.append(head, mathText('p', 'log-text', legacyText(event.text)));
+    item.append(head, mathText('p', 'log-text', autoMath(legacyText(event.text))));
     if (event.details && event.details.length) {
       const list = el('ul', 'log-details');
-      for (const detail of event.details) list.append(mathText('li', '', detail));
+      for (const detail of event.details) list.append(mathText('li', '', autoMath(detail)));
       item.append(list);
     }
     return item;
