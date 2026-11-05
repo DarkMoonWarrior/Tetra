@@ -1318,7 +1318,8 @@ async function showSlot(turn, no, reveal = true) {
     if (slot.bank_id) {
       source.snapshot = bankSnapshot(await request(`/api/bank/${slot.bank_id}`));
       source.fromBank = true;
-      source.resultNote = slot.source === 'generated' ? '现场出的，已通过全部检查' : '从题库里选的';
+      if (slot.source !== 'generated') source.resultNote = '从题库里选的';
+      else source.resultNote = source.snapshot.result.solution_issue ? '现场出的，待核对' : '现场出的，已通过全部检查';
     } else if (slot.job_id) {
       source.snapshot = await request(`/api/jobs/${slot.job_id}`);
     }
@@ -1599,7 +1600,8 @@ function renderSheet(turn, { animate = true } = {}) {
   let note = '';
   if (showResult) {
     key = `${snap.id}:result`;
-    note = turn.resultNote || (several ? `方案 ${snap.winner}，已通过全部检查` : '已通过全部检查');
+    const passed = snap.result.solution_issue ? '待核对' : '已通过全部检查';
+    note = turn.resultNote || (several ? `方案 ${snap.winner}，${passed}` : passed);
     build = () => {
       const reveal = animate && !state.revealed.has(snap.id);
       state.revealed.add(snap.id);
@@ -2020,8 +2022,27 @@ function followUp(turn, kind) {
     label = '换个情境';
     extra = `考查内容和难度不变，换一个和上一道不同的情境。${previous}`;
   }
+  // 上一次没出成：再试时把没出成的原因和上一次的题面一起交给命题员，避开同样的问题，
+  // 而不是原样再来一次（那和抽签差不多）
+  if (snap.status === 'failed' && (kind === 'retry' || kind === 'easier')) extra = failureContext(snap) || extra;
   afterFormChange();
   startGeneration({ extra, followUp: label });
+}
+
+// 没出成的那一次：各角色退回的原因（取最后几条）、最后的报错，以及最后一版题面
+function failureContext(snap) {
+  const reasons = [];
+  for (const event of (snap.events || []).filter((one) => one.kind === 'reject').slice(-4)) {
+    const detail = String((event.details || [])[0] || '');
+    reasons.push(`${legacyText(event.text)}${detail ? `（${detail}）` : ''}`.slice(0, 160));
+  }
+  if (snap.error) reasons.push(legacyText(snap.error).slice(0, 160));
+  const unique = [...new Set(reasons)].filter(Boolean);
+  if (!unique.length) return '';
+  const previews = (snap.lanes || []).flatMap((lane) => lane.previews || []);
+  const last = String(previews.at(-1)?.statement?.stem_plain || '').replace(/\s+/g, ' ').slice(0, 300);
+  const tried = last ? `\n上一次的题面（不要再用）：${last}` : '';
+  return `上一次按这个要求没出成，问题出在：${unique.join('；')}。这次换一种设计，避开这些问题。${tried}`.slice(0, 900);
 }
 
 function loadBrief(brief, meta, config) {
@@ -2415,17 +2436,37 @@ function openRailMenu(session, x, y, anchor) {
   };
   const confirm = () => {
     const box = el('div', 'rail-confirm');
-    box.append(
-      el('p', 'ask', `删除「${sessionTitle(session)}」？`),
-      el('p', 'note', '这个对话里的出题记录、聊天和组卷过程会删掉，不能恢复。出好的题已经收进题库、组好的试卷也还在，不受影响。'),
-    );
+    const note = el('p', 'note', '这个对话里的出题记录、聊天和组卷过程会删掉，不能恢复。出好的题已经收进题库、组好的试卷也还在，不受影响。');
+    box.append(el('p', 'ask', `删除「${sessionTitle(session)}」？`), note);
+    // 这个对话出的题也在题库里：可以勾选一起删掉（题出得不好、删对话时多半也不想留着）；组进试卷的留着
+    const withBank = el('input');
+    withBank.type = 'checkbox';
+    const option = el('label', 'rail-confirm-option');
+    option.hidden = true;
+    const optionText = el('span');
+    option.append(withBank, optionText);
+    box.append(option);
+    request(`/api/sessions/${encodeURIComponent(session.id)}/bank`).then((info) => {
+      const removable = info.count - info.in_papers;
+      if (!option.isConnected) return;
+      if (removable <= 0) {
+        // 出的题都组进了试卷：说明为什么不能顺带删（要删先从试卷里移出去）
+        if (info.count) note.textContent = `这个对话里的出题记录、聊天和组卷过程会删掉，不能恢复。这里出的 ${info.count} 道题组进了试卷，会留在题库里；要删，先从试卷里移出去。`;
+        place();
+        return;
+      }
+      note.textContent = '这个对话里的出题记录、聊天和组卷过程会删掉，不能恢复。组好的试卷还在，不受影响。';
+      optionText.textContent = `同时从题库删掉这里出的 ${removable} 道题${info.in_papers ? `（另有 ${info.in_papers} 道组进了试卷，保留）` : ''}`;
+      option.hidden = false;
+      place();
+    }).catch(() => {});
     const actions = el('div', 'rail-confirm-actions');
     const cancel = el('button', 'btn', '取消');
     cancel.type = 'button';
     cancel.addEventListener('click', main);
     const remove = el('button', 'btn danger', '删除');
     remove.type = 'button';
-    remove.addEventListener('click', () => deleteSession(session, remove));
+    remove.addEventListener('click', () => deleteSession(session, remove, !option.hidden && withBank.checked));
     actions.append(cancel, remove);
     box.append(actions);
     menu.replaceChildren(box);
@@ -2456,7 +2497,7 @@ async function pinSession(session, pinned) {
   }
 }
 
-async function deleteSession(session, button) {
+async function deleteSession(session, button, withBank = false) {
   if (state.job?.chat === session.id) {
     toast('这个对话里还有题在出，等它出完或先停止，再删除');
     return;
@@ -2466,13 +2507,16 @@ async function deleteSession(session, button) {
     return;
   }
   button.disabled = true;
+  let result;
   try {
-    await request(`/api/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' });
+    const query = withBank ? '?bank_items=true' : '';
+    result = await request(`/api/sessions/${encodeURIComponent(session.id)}${query}`, { method: 'DELETE' });
   } catch (error) {
     button.disabled = false;
     toast(error.message);
     return;
   }
+  setCounts(result?.counts);
   closeRailMenu();
   // 删的正是打开着的对话：回到起始页
   if (state.chat?.id === session.id) {
@@ -2482,7 +2526,7 @@ async function deleteSession(session, button) {
     shuffleSuggestions();
   }
   await loadSessions();
-  toast('已删除对话');
+  toast(result?.bank_deleted ? `已删除对话，题库里的 ${result.bank_deleted} 道题也删掉了` : '已删除对话');
 }
 
 // 打开一个对话：按顺序把每一道题排出来；正在出的那道接在最后

@@ -336,6 +336,9 @@ def _normalize_plane(raw: dict) -> dict:
             raise FigureError("多边形至少要 3 个顶点")
         polygons.append(names)
     has_curves = bool(functions or curves)
+    labels = _names(raw.get("labels") if raw.get("labels") is not None else list(points), points, "labels")
+    # 配图员有时把点名在 texts 里又写一遍，图上就成了"MM""PP"：点名已经标了的，texts 里的同名文字去掉
+    texts = [item for item in texts if item["text"].strip() not in labels]
     return {
         "kind": "plane",
         "x_range": x_range,
@@ -349,7 +352,7 @@ def _normalize_plane(raw: dict) -> dict:
         "segments": _pairs(raw.get("segments"), points, "segments"),
         "dashed": _pairs(raw.get("dashed"), points, "dashed"),
         "dots": _names(raw.get("dots") if raw.get("dots") is not None else list(points), points, "dots"),
-        "labels": _names(raw.get("labels") if raw.get("labels") is not None else list(points), points, "labels"),
+        "labels": labels,
         "marks": marks,
         "texts": texts,
     }
@@ -513,6 +516,15 @@ def _render_plane(spec: dict) -> str:
     y_marks = [m for m in spec["marks"] if m["axis"] == "y"]
     if spec["axes"] and y_marks:
         x0 = min(x0, -(max(_text_px(m["text"]) for m in y_marks) + 12) / ux)
+    # 点和文字不要贴着边：每个点四周留出点名的位置（右边、上边还要让开坐标轴的箭头），文字整段都放得下。
+    # 以前点落在显示范围的边上时，点名和 x 轴箭头挤在一起，靠边的文字被裁掉一截
+    for px, py in spec["points"].values():
+        x0, x1 = min(x0, px - 24 / ux), max(x1, px + 30 / ux)
+        y0, y1 = min(y0, py - 24 / uy), max(y1, py + 26 / uy)
+    for item in spec["texts"]:
+        tx, ty = item["at"][0], item["at"][1]
+        x1 = max(x1, tx + (_text_px(item["text"]) + 10) / ux)
+        y1 = max(y1, ty + 18 / uy)
     plot = Plot2D((x0, x1), (y0, y1), unit=ux, uy=uy, axes=spec["axes"])
     for item in spec["functions"]:
         plot.curve(compile_expr(item["expr"], "x"), max(item["from"], x0), min(item["to"], x1), cls="dash" if item["dashed"] else "ln")
@@ -545,6 +557,8 @@ def _render_plane(spec: dict) -> str:
         cy = sum(p[1] for p in points.values()) / len(points)
         for name in spec["labels"]:
             px, py = points[name]
+            if spec["axes"] and name == "O" and abs(px) < 1e-9 and abs(py) < 1e-9:
+                continue  # 坐标轴已经在原点写了 O，再标一次就成了"OO"
             vx, vy = (px - cx) * plot.ux, (cy - py) * plot.uy
             norm = math.hypot(vx, vy) or 1.0
             dx, dy = (10 * vx / norm - 5, 10 * vy / norm + 5) if math.hypot(vx, vy) > 1 else (6, -6)
@@ -633,13 +647,82 @@ def _tokens(run: str) -> list[str]:
     return re.findall(_P, run)
 
 
+def _curve_samples(spec: dict) -> list[np.ndarray]:
+    """平面图里的每条曲线（参数曲线、圆、函数图象）按顺序取的点，用来判断点在不在曲线上、线是不是切线。"""
+    curves = []
+    for item in spec["param_curves"]:
+        fx, fy = compile_expr(item["x"], "t"), compile_expr(item["y"], "t")
+        ts = np.linspace(item["from"], item["to"], 1441)
+        curves.append(np.array([[fx(t), fy(t)] for t in ts], float))
+    for circle in spec["circles"]:
+        ts = np.linspace(0, 2 * math.pi, 1441)
+        cx, cy = circle["center"][:2]
+        curves.append(np.column_stack([cx + circle["radius"] * np.cos(ts), cy + circle["radius"] * np.sin(ts)]))
+    for item in spec["functions"]:
+        fy = compile_expr(item["expr"], "x")
+        xs = np.linspace(item["from"], item["to"], 1441)
+        curves.append(np.array([[x, fy(x)] for x in xs], float))
+    return [curve[np.all(np.isfinite(curve), axis=1)] for curve in curves if len(curve)]
+
+
+def _check_curves(text: str, spec: dict) -> list[str]:
+    """坐标图里和曲线有关的关系：题干说的切点、曲线上的点要在曲线上；从曲线外一点连到切点的线要和曲线相切。
+    以前坐标图一律不核对，切线画歪了也查不出来（椭圆的两条切线、切点弦都画错过）。"""
+    points = {name: np.array(xy, float)[:2] for name, xy in spec["points"].items()}
+    curves = [curve for curve in _curve_samples(spec) if len(curve) > 2]
+    if not points or not curves:
+        return []
+    span = max(spec["x_range"][1] - spec["x_range"][0], spec["y_range"][1] - spec["y_range"][0])
+    near = 0.015 * span
+
+    def nearest(point):
+        """离这个点最近的曲线：(距离, 那里的切线方向)。"""
+        best = (math.inf, None)
+        for curve in curves:
+            gaps = np.linalg.norm(curve - point, axis=1)
+            i = int(np.argmin(gaps))
+            if gaps[i] < best[0]:
+                a, b = curve[max(i - 2, 0)], curve[min(i + 2, len(curve) - 1)]
+                best = (float(gaps[i]), b - a)
+        return best
+
+    names = lambda run: [name for name in _tokens(run) if name in points]  # noqa: E731
+    touching = []
+    for run in re.findall(rf"切点(?:分别)?(?:为|是)((?:{_P},?)+)", text):
+        touching += names(run)
+    on_curve = list(touching)
+    for run in re.findall(rf"((?:{_P},?)+)(?:两点)?(?:都|均)?(?:是|为|在)(?:椭圆|双曲线|抛物线|圆|曲线)[A-Z\d]*上", text):
+        on_curve += names(run)
+    for run in re.findall(rf"交(?:椭圆|双曲线|抛物线|圆|曲线)[A-Z\d]*于((?:点)?(?:{_P},?)+)", text):
+        on_curve += names(run)
+    problems = []
+    for name in dict.fromkeys(on_curve):
+        if nearest(points[name])[0] > near:
+            problems.append(f"题干说 {name} 在曲线上，图里 {name} 不在曲线上")
+    for name in dict.fromkeys(touching):
+        gap, tangent = nearest(points[name])
+        if gap > near or tangent is None or not np.linalg.norm(tangent):
+            continue
+        for a, b in spec["segments"]:
+            other = b if a == name else a if b == name else None
+            if other is None or other not in points or nearest(points[other])[0] <= near:
+                continue  # 另一端也在曲线上的是弦，不是切线
+            line = points[other] - points[name]
+            cross = float(line[0] * tangent[1] - line[1] * tangent[0])
+            sine = abs(cross) / (np.linalg.norm(line) * np.linalg.norm(tangent) + 1e-12)
+            if sine > 0.06:  # 夹角超过约 3.4°
+                problems.append(f"题干说 {name} 是切点，图里 {other}{name} 在 {name} 处和曲线不相切，切点要按题设算准")
+    return list(dict.fromkeys(problems))
+
+
 def check(stem: str, spec: dict) -> list[str]:
     """返回图和题干对不上的地方；没有问题返回空列表。只核对能从坐标算出来的关系。"""
     if spec["kind"] not in ("solid", "plane"):
         return []
     points = {name: np.array(xyz, float) for name, xyz in spec["points"].items()}
     if spec["kind"] == "plane" and (spec["functions"] or spec["param_curves"]) and not spec["polygons"]:
-        return []  # 函数图象类的题，字母多半不是点名，不核对
+        # 函数图象、圆锥曲线类的题，字母多半不是线段名，不按几何关系核对；只核对和曲线有关的切点、曲线上的点
+        return _check_curves(plain_stem(stem), spec)
     text = plain_stem(stem)
     problems: list[str] = []
     if points:
@@ -729,8 +812,22 @@ def answer_numbers(answer: str) -> list[float]:
     return [v for v in values if v != 0]
 
 
-def reveals_answer(spec: dict, answer: str) -> list[str]:
-    """统计图里把题目要求的数直接标出来了（比如要求的那一组的高或频率），返回问题；只核对统计图。"""
+def _coordinate_pairs(text: str) -> set[str]:
+    """文字里的坐标，如 (1,0)、(-2,√3)，统一成没有空格的写法。"""
+    plain = plain_stem(text).replace("（", "(").replace("）", ")")
+    return set(re.findall(r"\(-?[\d.√/]+,-?[\d.√/]+\)", plain))
+
+
+def reveals_answer(spec: dict, answer: str, stem: str = "") -> list[str]:
+    """图里把题目要求的结果直接标出来了，返回问题：统计图里要求的那一组的高或频率；
+    坐标图里要求的点的坐标（比如"恒过定点"问的那个定点，图上写着 (1,0)）。题干里已经给出的不算。"""
+    if spec.get("kind") == "plane":
+        asked = _coordinate_pairs(answer) - _coordinate_pairs(stem)
+        return [
+            f"图里写了“{item['text']}”，这是题目要求的结果，不能标在图上；只标点名，不写坐标"
+            for item in spec["texts"]
+            if _coordinate_pairs(item["text"]) & asked
+        ]
     if spec.get("kind") != "chart":
         return []
     wanted = answer_numbers(answer)
@@ -760,7 +857,8 @@ INSTRUCTIONS = (
     "chart 统计图表（频率分布直方图、条形图）；none 这道题不需要配图。\n"
     "要求：\n"
     "1. 点的位置、长度、角度、位置关系必须和题干完全一致：中点就取两端点坐标的平均，垂直就让向量点积为 0，长度按题干给的数。"
-    "题干没给具体长度时，取看起来匀称的数值。\n"
+    "题干没给具体长度时，取看起来匀称的数值。曲线上的点要真的在曲线上；切线的切点要按题设算出来"
+    "（比如先给参数取一个具体值，再用切线方程或切点弦方程求切点坐标），不能凭感觉取，程序会核对是否相切。\n"
     "2. solid：points 给每个点的三维坐标 [x, y, z]，z 轴竖直向上，y 轴是纵深（指向纸内），底面放在 z=0 上。"
     "faces 列出几何体的所有面（每个面按顶点顺序列点名），程序靠它判断哪些线被挡住、自动画成虚线；"
     "segments 列出要画的全部棱和题干提到的辅助线（对角线、连线、高等），每条线只写一次，"
@@ -869,7 +967,7 @@ def illustrate(draft: dict, *, call, request: str = "", required: bool = False) 
                     return None
                 raise FigureError("老师要给这道题配图，kind 不能是 none，请按题干画一张")
             svg = render(spec)
-            problems = check(stem, spec) + reveals_answer(spec, answer)
+            problems = check(stem, spec) + reveals_answer(spec, answer, stem)
         except FigureError as exc:
             problems, spec, svg = [str(exc)], None, None
         except Exception as exc:  # noqa: BLE001 - 图纸里有程序没料到的写法，让配图员换一种写法

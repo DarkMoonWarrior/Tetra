@@ -119,6 +119,7 @@ export class BatchTurn {
           role: null,
           stem: record.result?.stem_latex || record.result?.stem_plain || '',
           error: record.error,
+          flagged: Boolean(record.result?.solution_issue),
         }
         : { index, job_id: null, status: 'cancelled', elapsed: 0, calls: 0, tokens: 0, stem: '', error: null });
     }
@@ -177,14 +178,14 @@ export class BatchTurn {
     this.bar.hidden = !running;
     this.barFill.style.width = `${Math.round(((done + failed) / Math.max(1, this.count)) * 100)}%`;
     this.renderRows(items);
-    this.renderOutcome(running, done, failed, stopped);
+    this.renderOutcome(running, done, failed, stopped, items.filter((item) => item.flagged).length);
   }
 
   renderRows(items) {
     let changed = false;
     for (const item of items) {
       const stage = item.stage ? describeStage(item.stage).text : '';
-      const key = `${item.status}|${item.stem}|${stage}|${item.error || ''}|${this.focusedIndex === item.index}`;
+      const key = `${item.status}|${item.flagged}|${item.stem}|${stage}|${item.error || ''}|${this.focusedIndex === item.index}`;
       if (this.rowKeys.get(item.index) === key) continue;
       this.rowKeys.set(item.index, key);
       changed = true;
@@ -199,7 +200,7 @@ export class BatchTurn {
       const open = button('', 'batch-row', () => this.actions.showItem(this, item.index));
       open.disabled = !item.job_id;
       const state = el('span', 'batch-state');
-      state.append(el('i', 'dot'), document.createTextNode(STATE_TEXT[item.status] || item.status));
+      state.append(el('i', 'dot'), document.createTextNode(item.flagged ? '待核对' : STATE_TEXT[item.status] || item.status));
       let text;
       if (item.status === 'failed') text = el('span', 'batch-text bad', legacyText(item.error) || '没能得到通过全部检查的题');
       else if (item.stem) text = el('span', 'batch-text stem compact-math', oneLine(item.stem));
@@ -227,8 +228,8 @@ export class BatchTurn {
     this.time.textContent = formatClock(seconds);
   }
 
-  renderOutcome(running, done, failed, stopped) {
-    const key = `${running}:${done}:${failed}:${stopped}`;
+  renderOutcome(running, done, failed, stopped, flagged) {
+    const key = `${running}:${done}:${failed}:${stopped}:${flagged}`;
     if (running) {
       this.outcome.hidden = true;
       this.outcomeKey = '';
@@ -242,7 +243,8 @@ export class BatchTurn {
     let summary = '这一批一道也没出成。可以换一个考点，或者降一档难度再试。';
     if (done) {
       const rest = stopped ? `另外 ${failed} 道没有出。` : failed ? `另外 ${failed} 道没出成，可以再出一批补上。` : '';
-      summary = `出好的 ${done} 道都审题、复核过，已经收进题库。${rest}`;
+      const checked = flagged ? `其中 ${flagged} 道复核还有意见，标了“待核对”，用之前请看一下。` : '';
+      summary = `出好的 ${done} 道都审题、复核过，已经收进题库。${checked}${rest}`;
     } else if (stopped) summary = '已经停下，这次没有生成题目。';
     this.outcome.append(el('p', '', summary));
     const actions = el('div', 'followups');

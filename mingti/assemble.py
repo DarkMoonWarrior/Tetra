@@ -109,9 +109,10 @@ def _similar(a: str, b: str) -> float:
 
 
 def usable(item: dict) -> bool:
-    """题库里这道题能不能直接组进卷子：有题干、有答案；选择题有选项；说了"如图"就得有图；解答题得有解析。"""
+    """题库里这道题能不能直接组进卷子：有题干、有答案；选择题有选项；说了"如图"就得有图；解答题得有解析；
+    标了"待核对"的题要老师看过才用。"""
     stem = str(item.get("stem") or "")
-    if not stem.strip() or not str(item.get("answer") or "").strip():
+    if not stem.strip() or not str(item.get("answer") or "").strip() or item.get("solution_issue"):
         return False
     if item.get("question_type") in ("single_choice", "multiple_choice") and len(item.get("options") or []) < 2:
         return False
@@ -582,7 +583,7 @@ class AssemblyManager:
                     with assembly.lock:
                         slot.update(
                             state="generated", bank_id=item["id"], stem=item["stem"][:600],
-                            difficulty=int(item["difficulty"]), error=None,
+                            difficulty=int(item["difficulty"]), error=None, flagged=bool(item.get("solution_issue")),
                         )
                     return
             error = job.error or "没能得到通过全部检查的题"

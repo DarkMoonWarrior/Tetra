@@ -466,11 +466,30 @@ def rename_session(session_id: str, payload: RenameRequest) -> dict:
     return {"title": payload.title.strip()}
 
 
+def _session_bank_ids(session_id: str) -> tuple[list[str], set[str]]:
+    """这个对话出的题在题库里的编号，以及其中已经组进试卷的（这些删对话时也不动，免得试卷缺题）。"""
+    ids = bank.ids_for_sources(store.question_ids(session_id))
+    used = bank.used_in_papers()
+    return ids, {item_id for item_id in ids if item_id in used}
+
+
+@app.get("/api/sessions/{session_id}/bank")
+def session_bank(session_id: str) -> dict:
+    """删除对话前问一句要不要连题库里的题一起删：这个对话出的题有几道在题库里、几道组进了试卷。"""
+    ids, in_papers = _session_bank_ids(session_id)
+    return {"count": len(ids), "in_papers": len(in_papers)}
+
+
 @app.delete("/api/sessions/{session_id}")
-def delete_session(session_id: str) -> dict:
+def delete_session(session_id: str, bank_items: bool = False) -> dict:
+    """bank_items=true：这个对话出的题也从题库删掉（组进试卷的留着）。"""
     if _session_busy(session_id):
         raise HTTPException(409, "这个对话里还有题在出，等它出完或先停止，再删除")
-    return {"deleted": store.delete_session(session_id)}
+    removed = 0
+    if bank_items:
+        ids, in_papers = _session_bank_ids(session_id)
+        removed = bank.delete([item_id for item_id in ids if item_id not in in_papers])
+    return {"deleted": store.delete_session(session_id), "bank_deleted": removed, "counts": bank.counts()}
 
 
 # ---------- 自动组卷：按一句话的要求定方案、从题库挑题，不够的现场出题，组成试卷 ----------

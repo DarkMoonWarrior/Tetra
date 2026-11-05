@@ -32,6 +32,7 @@ from lxml import etree
 
 from mingti.bank import TYPE_ORDER
 from mingti.config import RUNTIME_DIR
+from mingti.math_content import tidy_math_text
 from mingti.figures import svg_to_png
 
 logger = logging.getLogger("mingti.export")
@@ -107,7 +108,7 @@ def answer_text(question: dict) -> str:
     if question["question_type"] in ("single_choice", "multiple_choice"):
         letters = "".join(re.findall(r"[A-H]", question["answer"].upper()))
         return letters or question["answer"]
-    return question["answer"]
+    return tidy_math_text(question["answer"])  # 以前存下的答案偶尔是裸的 \frac{2}{5}
 
 
 def paper_meta(paper: dict, total: float) -> str:
@@ -181,7 +182,8 @@ def _glue_punctuation(text: str) -> str:
 
 
 def _text(value: str) -> str:
-    return f'<span class="tx">{html.escape(_glue_punctuation(value or ""))}</span>'
+    # 以前存下的题里偶尔有漏写 $ 的公式（裸的 \frac{2}{5}），排版前补上（math_content.tidy_math_text）
+    return f'<span class="tx">{html.escape(_glue_punctuation(tidy_math_text(value)))}</span>'
 
 
 # 夜晚主题下预览页纸张四周的底色（窄屏时纸铺满整页，不用改）
@@ -401,7 +403,7 @@ _BLANK = re.compile(r"_{3,}|＿{2,}")
 
 def _std(text: str, *, choice: bool = False) -> str:
     """标准试卷里的一段文字：选择题去掉末尾的（　　），句号写成"．"，横线空写成下划线，公式交给 KaTeX。"""
-    text = (text or "").strip()
+    text = tidy_math_text((text or "").strip())
     if choice:
         text = _CHOICE_TAIL.sub("", text).rstrip()
     # 公式外面的文字：句号写成"．"，横线空先换成占位符（转义 HTML 之后再换成下划线），公式原样留给 KaTeX
@@ -418,7 +420,7 @@ def _std(text: str, *, choice: bool = False) -> str:
 
 def _std_plain(text: str, *, choice: bool = False) -> str:
     """Word 里的标准试卷文字：和 _std 一样改写，但不转 HTML；横线空写成一段下划线。"""
-    text = (text or "").strip()
+    text = tidy_math_text((text or "").strip())
     if choice:
         text = _CHOICE_TAIL.sub("", text).rstrip()
     out, position = [], 0
@@ -698,7 +700,8 @@ def _add_text(paragraph, text: str, *, bold: bool = False, east_asia: str = "宋
 
 
 def _add_rich(paragraph, text: str) -> None:
-    """文字和 $…$ 公式混排：文字按宋体写，公式转成 Word 公式。"""
+    """文字和 $…$ 公式混排：文字按宋体写，公式转成 Word 公式。以前存下的、漏写 $ 的公式先补上。"""
+    text = tidy_math_text(text)
     position = 0
     for match in MATH.finditer(text or ""):
         _add_text(paragraph, text[position:match.start()])

@@ -13,8 +13,9 @@ import logging
 import re
 from typing import Callable
 
+from mingti.math_content import tidy_math_text
 from mingti.question_authoring import PROMPT_REVISION, DeepSeekQuestionAuthoringProvider
-from mingti.question_authoring.scope import beyond_curriculum_methods
+from mingti.question_authoring.scope import scope_violations
 
 logger = logging.getLogger("mingti.answer_key")
 
@@ -48,14 +49,14 @@ Call = Callable[[str, str, dict, dict, int], dict]
 
 
 def closing_line(draft: dict) -> str:
-    answer = str(draft.get("answer_value") or "").strip()
+    answer = tidy_math_text(str(draft.get("answer_value") or "").strip())
     if draft.get("question_type") in ("single_choice", "multiple_choice"):
         # 试卷上多选的答案写成"ABC"，不写"A,B,C"
         letters = "".join(re.findall(r"[A-H]", answer.upper()))
         answer = letters or answer
         return f"故选：{answer}" if answer else ""
     if draft.get("question_type") == "fill_blank":
-        final = str(draft.get("final_answer") or answer).strip().rstrip("。")
+        final = tidy_math_text(str(draft.get("final_answer") or answer).strip()).rstrip("。")
         return f"故答案为：{final}" if final else ""
     return ""
 
@@ -92,13 +93,13 @@ def condense(draft: dict, *, detail: str, call: Call) -> dict:
     except Exception as exc:  # noqa: BLE001 - 整理不成功就保留完整推导，不影响出题结果
         logger.warning("解析整理失败，保留完整推导：%s", exc)
         return draft
-    steps = [str(step).strip() for step in result.get("steps") or [] if str(step).strip()]
+    steps = [tidy_math_text(str(step).strip()) for step in result.get("steps") or [] if str(step).strip()]
     steps = [step for step in steps if not _CLOSING.match(step)]
     if not steps or len(steps) > MAX_LINES:
         logger.warning("解析整理的结果不合要求（%d 步），保留完整推导", len(steps))
         return draft
-    if beyond_curriculum_methods(str(result.get("method") or ""), *steps):
-        logger.warning("解析整理时用了高中不学的方法，保留完整推导")
+    if scope_violations(str(result.get("method") or ""), *steps):
+        logger.warning("解析整理时用了高中不学的方法或说法，保留完整推导")
         return draft
     closing = closing_line(draft)
     if closing:
@@ -106,7 +107,7 @@ def condense(draft: dict, *, detail: str, call: Call) -> dict:
     condensed = dict(draft)
     condensed["full_solution_method"] = draft.get("solution_method") or ""
     condensed["full_solution_steps"] = list(draft.get("solution_steps") or [])
-    condensed["solution_method"] = str(result.get("method") or "").strip()
+    condensed["solution_method"] = tidy_math_text(str(result.get("method") or "").strip())
     condensed["solution_steps"] = steps
     condensed["solution_detail"] = detail
     return condensed

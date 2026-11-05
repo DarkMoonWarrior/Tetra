@@ -71,6 +71,7 @@ CONFIGS = {
     "C-gate": Config("C 关答案闸门", PipelineSwitches(answer_gate=False)),
     "C-keyres": Config("C 关关键结果共享", PipelineSwitches(key_results=False)),
     "C-xcheck": Config("C 关审题答案交叉核对", PipelineSwitches(reviewer_cross_check=False)),
+    "C-reroll": Config("C 关定点修改（退回后整份重写，到上限算失败）", PipelineSwitches(targeted_repair=False)),
 }
 
 # ---------- 测试集：从 9 套模拟卷的 171 条命题要求里分层抽 ----------
@@ -188,6 +189,7 @@ class Run:
         self.events: list[dict] = []
         self.statements = 0
         self.over_budget = False
+        self.has_candidate = False
         self.network_errors: list[str] = []
         self._halt = threading.Event()
         self._lock = threading.Lock()
@@ -201,6 +203,9 @@ class Run:
 
     def halt(self) -> None:
         self._halt.set()
+
+    def candidate_ready(self) -> None:
+        self.has_candidate = True
 
     def lane_status(self, lane: str, status: str, note: str = "") -> None:
         if status == "failed":
@@ -230,7 +235,8 @@ class Run:
         with self._lock:
             self.calls.append(call)
             # 超过上限：这次调用照常做完，下一次调用前停下（同 jobs.Job._on_call）
-            if len(self.calls) > self.MAX_CALLS or call["started"] - self.started > self.MAX_SECONDS:
+            allow = 1 if self.has_candidate else 1.5
+            if len(self.calls) > self.MAX_CALLS * allow or call["started"] - self.started > self.MAX_SECONDS * allow:
                 self.over_budget = True
                 self._halt.set()
         usage = _Usage()
@@ -260,7 +266,7 @@ def scope_hits(question: dict) -> list[str]:
 
 QUESTION_FIELDS = (
     "question_type", "stem_plain", "stem_latex", "options", "answer_value", "final_answer", "solution_method",
-    "solution_steps", "estimated_difficulty", "knowledge_points", "solution_status",
+    "solution_steps", "estimated_difficulty", "knowledge_points", "solution_status", "solution_issue",
 )
 
 
@@ -306,6 +312,7 @@ def run_one(spec: dict, name: str, routes: dict, catalog, verifier, budget: floa
         "status": status,
         "error": error[:600],
         "over_budget": run.over_budget,
+        "flagged": bool(question and question.get("solution_issue")),  # 返工到上限交付的，复核还有意见
         "seconds": round(time.time() - run.started, 1),
         "calls": len(calls),
         "input_tokens": sum(c.get("input_tokens", 0) for c in calls),

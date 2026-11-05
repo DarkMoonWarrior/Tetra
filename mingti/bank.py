@@ -59,6 +59,8 @@ class BankQuestion(BaseModel):
     # 配图：配图员写的图纸和按图纸画出来的 SVG（没有配图时为空）
     figure: dict | None = None
     figure_svg: str = Field(default="", max_length=300000)
+    # 返工到上限时交付的题：复核还没解决的意见。老师改过这道题以后就清掉
+    solution_issue: str = Field(default="", max_length=1000)
 
 
 class PaperItem(BaseModel):
@@ -120,6 +122,7 @@ def question_from_record(record: dict) -> BankQuestion | None:
             full_solution_steps=list(draft.get("full_solution_steps") or []),
             figure=draft.get("figure"),
             figure_svg=draft.get("figure_svg") or "",
+            solution_issue=draft.get("solution_issue") or "",
         )
     except ValidationError as exc:
         logger.warning("记录 %s 没能收进题库：%s", record.get("id"), exc)
@@ -281,6 +284,14 @@ class BankStore:
                 ),
             )
         return self.get(item_id) if cursor.rowcount else None
+
+    def ids_for_sources(self, source_ids: list[str]) -> list[str]:
+        """由这些出题记录收进题库的题（删除对话时可以一起删）。"""
+        if not source_ids:
+            return []
+        with self._connect() as db:
+            marks = ",".join("?" for _ in source_ids)
+            return [row[0] for row in db.execute(f"select id from bank_items where source_id in ({marks})", source_ids)]
 
     def delete(self, item_ids: list[str]) -> int:
         if not item_ids:

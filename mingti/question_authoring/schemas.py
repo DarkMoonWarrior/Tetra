@@ -32,7 +32,8 @@ QuestionDraftTrustEvidenceSource = Literal[
     "model_estimate",
     "none",
 ]
-QuestionSolutionStatus = Literal["ready", "needs_teacher_verification"]
+# open_review_issues：解析写完了，但返工到上限复核还有意见没解决。照常交付，solution_issue 写明这些意见
+QuestionSolutionStatus = Literal["ready", "needs_teacher_verification", "open_review_issues"]
 
 
 class QuestionDesignBrief(BaseModel):

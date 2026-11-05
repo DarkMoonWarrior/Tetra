@@ -219,6 +219,11 @@ class QuestionStore:
                 (session_id, title.strip()[:40] or None),
             )
 
+    def question_ids(self, session_id: str) -> list[str]:
+        """这个对话里的出题记录编号（题库里的题按它找来源）。"""
+        with self._connect() as db:
+            return [row[0] for row in db.execute("select id from questions where session_id = ?", (session_id,))]
+
     def delete_session(self, session_id: str) -> int:
         """删掉一个对话：它的出题记录、聊天、组卷和摘要。题库里的题和试卷是另存的，不受影响。"""
         with self._lock, self._connect() as db:

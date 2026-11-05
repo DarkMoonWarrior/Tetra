@@ -259,7 +259,8 @@ export class PaperTurn {
     if (paper) {
       this.outcome.className = 'outcome ok';
       const from = [`从题库里选了 ${totals.picked || 0} 道`];
-      if (totals.generated) from.push(`现场出了 ${totals.generated} 道（都审核过，已收进题库）`);
+      const flagged = (snap.slots || []).filter((slot) => slot.flagged).length;
+      if (totals.generated) from.push(flagged ? `现场出了 ${totals.generated} 道（其中 ${flagged} 道复核还有意见，用之前请核对）` : `现场出了 ${totals.generated} 道（都审核过，已收进题库）`);
       const lacking = totals.failed ? `；有 ${totals.failed} 道没出成，可以在试卷里从题库补上` : '';
       this.outcome.append(
         el('p', '', `${snap.status === 'cancelled' ? '已停下：' : ''}《${paper.title}》，${paper.count} 道题，满分 ${scoreText(paper.total)} 分。`),

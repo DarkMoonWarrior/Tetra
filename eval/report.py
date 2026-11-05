@@ -136,6 +136,7 @@ def summarize(rows: list[dict]) -> dict:
     return {
         "n": n,
         "succeeded": len(done),
+        "flagged": sum(bool(r.get("flagged")) for r in done),  # 交付了，但复核还有意见（标了待核对）
         "success_rate": len(done) / n if n else 0,
         "success_ci": wilson(len(done), n),
         "over_budget": sum(r["over_budget"] for r in rows),

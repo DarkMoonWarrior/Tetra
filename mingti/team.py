@@ -32,6 +32,7 @@ from mingti.question_authoring.providers import (
     PipelineSwitches,
     _ContentCandidateRejected,
     _QuestionInvalidAfterSolution,
+    _QuestionNeedsHighSchoolRework,
     _SolutionInvalidAfterReview,
 )
 from mingti.question_authoring.schemas import ProviderQuestionDraft
@@ -57,7 +58,7 @@ def role_of(stage: str) -> str:
         or re.search(r"-review-check(?:-\d+)?$", s)
     ):
         return "reviewer"
-    if s.startswith(("completed-solution-review", "solution-regeneration-verification")):
+    if s.startswith(("completed-solution-review", "solution-regeneration-verification", "solution-scope-review")):
         return "auditor"
     if s.startswith("solution-"):
         return "solver"
@@ -82,6 +83,8 @@ class TeamHooks(Protocol):
     def should_stop(self) -> bool: ...
 
     def halt(self) -> None: ...
+
+    def candidate_ready(self) -> None: ...
 
 
 class LaneProvider(DeepSeekQuestionAuthoringProvider):
@@ -126,10 +129,7 @@ class LaneProvider(DeepSeekQuestionAuthoringProvider):
                 thinking=self._thinking_for(stage),
             )
             run.capture_response(raw)
-        payload = json.loads(self._extract_output_text(raw))
-        if not isinstance(payload, dict):
-            raise ValueError("顶层结果必须是 JSON 对象")
-        return payload
+        return self._payload_from(raw)
 
     def _review_question_core(self, core, *, stage):
         review = super()._review_question_core(core, stage=stage)
@@ -153,17 +153,40 @@ class LaneProvider(DeepSeekQuestionAuthoringProvider):
             [f"命题构造算得：{planned}", f"审题员独立算得：{reviewer}"],
         )
 
+    def _report_solution_rejected(self, rejection):
+        # 超纲的退回：摘要里已经写了复核员的判断和交给谁（见 _check_solution_scope）
+        text = rejection.summary if rejection.scope else f"解析没通过复核，退回解题员：{rejection.summary}"
+        self.hooks.event(self.lane, "auditor", "reject", text, rejection.issues)
+
+    def _report_solution_repaired(self, round_no, changed, disputed, objection=""):
+        if changed:
+            text = f"按复核意见改了 {len(changed)} 处"
+        elif objection:
+            text = "核算后认为用高中方法做不出来，说明了理由，交回复核员"
+        else:
+            text = "核算后认为这轮的意见不成立，没有修改"
+        details = [*changed[:3], *[f"有异议：{item}" for item in disputed]]
+        if objection:
+            details.append(f"高中方法做不出来的理由：{objection}")
+        self.hooks.event(self.lane, "solver", "note", f"第 {round_no} 轮：{text}", details)
+
+    def _report_candidate(self):
+        self.hooks.candidate_ready()
+
     def _solve_reviewed_statement(self, core, provider_input, **kwargs):
         try:
             plan, steps, conclusion = super()._solve_reviewed_statement(core, provider_input, **kwargs)
+        except _QuestionNeedsHighSchoolRework as exc:
+            # 题面没有错，只是只能用大学方法解：命题员拿到复核员的判断、改题建议和解题员的理由
+            self.hooks.event(self.lane, "auditor", "reject", exc.summary, exc.issues)
+            raise
         except _QuestionInvalidAfterSolution as exc:
             role = "auditor" if self._last_role == "auditor" else "solver"
             self.hooks.event(self.lane, role, "reject", f"题面有问题，退回命题员：{exc.summary}", exc.issues)
             raise
         except _SolutionInvalidAfterReview as exc:
-            self.hooks.event(
-                self.lane, "auditor", "reject", f"解析没通过复核，退回解题员：{exc.summary}", exc.issues
-            )
+            if not exc.reported:  # 写解析时就出了问题，还没到复核那一步
+                self._report_solution_rejected(exc)
             raise
         self.hooks.event(
             self.lane, "auditor", "pass", "解析与答案复核通过", [f"答案：{conclusion.final_answer}"]
@@ -324,7 +347,7 @@ class TeamProvider:
             if winner is not None:
                 # 其余组在下一次调用模型前停下；正在进行的那次调用结束后不再继续
                 self.hooks.halt()
-                self.hooks.lane_status(winner[0], "won")
+                self.hooks.lane_status(winner[0], "won", winner[1].solution_issue or "")
             executor.shutdown(wait=False, cancel_futures=True)
         if winner is None:
             if self.hooks.should_stop():
@@ -352,27 +375,53 @@ class TeamProvider:
             on_statement_approved=on_statement,
         )
         self.hooks.lane_status(lane, "running")
+        # 前几版被退回的题面和原因：重出时交给命题员，让他知道上一版错在哪里，而不是蒙着头再出一版
+        earlier: list[dict] = []
         try:
             for attempt in range(1, WHOLE_QUESTION_ATTEMPTS + 1):
                 try:
-                    draft = provider._generate_candidate(lane_context, reauthoring=attempt > 1)
+                    draft = provider._generate_candidate(lane_context, reauthoring=attempt > 1, earlier=earlier[-2:])
                 except _ContentCandidateRejected as exc:
-                    self.hooks.event(lane, "composer", "reject", f"这一版不合格，重新出题。{exc}")
+                    note = exc.feedback()
+                    if note:
+                        earlier.append(note)
+                    lead = "这一版不合格，带着退回的原因重新出题" if note else "这一版不合格，重新出题"
+                    self.hooks.event(lane, "composer", "reject", f"{lead}。{exc}", (note or {}).get("problems", []))
                     continue
-                if verifier is not None:
+                if verifier is not None and draft.solution_status == "ready":  # 待核对的版本不再为验算重出
                     ok, reason, details = verifier.check(draft)
                     if not ok:
                         self.hooks.event(
                             lane, "verifier", "reject", f"独立验算的答案和解析对不上，重新出题。{reason}", details
                         )
+                        earlier.append(
+                            {
+                                "rejected_stem": draft.stem_plain[:800],
+                                "problems": [
+                                    "只看题面的独立验算和解析得出的答案对不上，题目的条件可能不足以唯一确定答案，或者数据有误。",
+                                    *details,
+                                ],
+                            }
+                        )
                         continue
                     self.hooks.event(lane, "verifier", "pass", "独立验算结果一致", details)
                 return draft
+            best = provider.best_candidate_draft()
+            if best is not None:
+                return best
             raise QuestionAuthoringProviderError(f"连续 {WHOLE_QUESTION_ATTEMPTS} 版题都没有通过")
         except StopRequested:
+            # 用户点的停止就是停止；到了调用次数或时间上限，手里有写完的解析就交出来，不让用户白等
+            best = provider.best_candidate_draft() if self.hooks.over_budget else None
+            if best is not None:
+                return best
             self.hooks.lane_status(lane, "stopped")
             raise
         except QuestionAuthoringProviderError as exc:
+            # 模型接口出错（余额不足、网络断了）也一样：已经写好的不能丢
+            best = provider.best_candidate_draft()
+            if best is not None:
+                return best
             self.hooks.lane_status(lane, "failed", str(exc))
             raise
         finally:

@@ -62,3 +62,9 @@ def beyond_curriculum_methods(*values: str) -> list[str]:
         for pattern, label in BEYOND_CURRICULUM_METHODS
         if re.search(pattern, combined, flags=re.IGNORECASE)
     ]
+
+
+def scope_violations(*values: str) -> list[str]:
+    """大学才有的概念和高中不用的解法合在一起查。出题流程里每一处范围检查都用它，
+    和交付前的最终检查（authoring._validate_high_school_scope）是同一套规则，流程里放过的，最后也不会拦下。"""
+    return university_only_terms(*values) + beyond_curriculum_methods(*values)

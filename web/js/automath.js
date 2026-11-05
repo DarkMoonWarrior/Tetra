@@ -161,6 +161,72 @@ function convert(run, prior, after, mixed) {
   return run;
 }
 
+// ---------- 漏写 $ 的公式（题干、选项、答案、解析） ----------
+// 这些内容本来就要求写成 $…$，只是模型偶尔会漏：答案写成裸的 \frac{2}{5}，或者把换行多转义一次，
+// 留下字面上的 \n、\par。tidyMath 只处理 $…$ 之外的这两种情况，规则和 mingti/math_content.py 的
+// tidy_math_text 一样（新出的题在服务端就整理好了，这里管以前存下的内容）。不像 autoMath 那样猜纯文本公式。
+// 这些 \n 开头的是真的 LaTeX 命令，不是换行（同 mingti/deepseek.py 的 LATEX_N_COMMANDS）
+const N_COMMANDS = new Set(`nabla natural ncong ne nearrow neg negthickspace negmedspace negthinspace neq newcommand newline nexists
+  ngeq ngeqq ngeqslant ngtr ni nleftarrow nLeftarrow nleftrightarrow nLeftrightarrow nleq nleqq nleqslant nless
+  nmid nobreak nobreakspace noexpand nolimits nonumber normalfont normalsize not notag notin notni nparallel nprec
+  npreceq nrightarrow nRightarrow nshortmid nshortparallel nsim nsubset nsubseteq nsubseteqq nsucc nsucceq
+  nsupset nsupseteq nsupseteqq ntriangleleft ntrianglelefteq ntriangleright ntrianglerighteq nu nvdash nvDash
+  nVdash nVDash nwarrow`.split(/\s+/));
+const TIDY_RUN = /[A-Za-z0-9\\{}^_+\-*/=<>()[\]|,.!:;' ]+/g;
+// 已经写成公式的部分。和 KaTeX 配对 $ 的方式一样：$…$ 中间可以换行（有些旧内容的公式里夹着换行）
+const TIDY_WRITTEN = /(\$\$[\s\S]+?\$\$|\$[^$]+?\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\])/;
+
+function literalNewlines(text) {
+  return text.replace(/\\(par|newline|n[a-zA-Z]*)(?![a-zA-Z])([ \t]*)/g, (all, word, space) => {
+    if (word === 'par' || word === 'newline' || word === 'n') return '\n'; // 换行后面的空格也去掉
+    if (N_COMMANDS.has(word)) return all;
+    return `\n${word.slice(1)}${space}`;
+  });
+}
+
+function balanced(core) {
+  let depth = 0;
+  for (const char of core.replaceAll('\\{', '').replaceAll('\\}', '')) {
+    if (char === '{') depth += 1;
+    else if (char === '}' && --depth < 0) return false;
+  }
+  return depth === 0;
+}
+
+function tidyEdges(run) {
+  let lead = run.match(/^(?:[\s,.:;]|\(\d\)\s*)*/)[0];
+  let core = run.slice(lead.length);
+  let tail = core.match(/[\s,.:;!]*$/)[0];
+  core = core.slice(0, core.length - tail.length);
+  const count = (pattern) => (core.match(pattern) || []).length;
+  while (core && /[)\]]$/.test(core) && count(/[)\]]/g) > count(/[([]/g)) {
+    tail = core.at(-1) + tail;
+    core = core.slice(0, -1);
+  }
+  while (core && /^[([]/.test(core) && count(/[([]/g) > count(/[)\]]/g)) {
+    lead += core[0];
+    core = core.slice(1);
+  }
+  return [lead, core, tail];
+}
+
+function wrapRuns(part) {
+  return part.replace(TIDY_RUN, (run, at) => {
+    const [lead, core, tail] = tidyEdges(run);
+    if (!/\\[a-zA-Z]/.test(core) || !balanced(core) || core.endsWith('\\') || !renders(core)) return run;
+    const left = !lead && CJK.test(part[at - 1] || '') ? ' ' : '';
+    const right = !tail && CJK.test(part[at + run.length] || '') ? ' ' : '';
+    return `${lead}${left}$${core}$${right}${tail}`;
+  });
+}
+
+export function tidyMath(text) {
+  const source = String(text ?? '');
+  // $ 的个数是单数时配不上对，分不清哪里是公式，不动
+  if (!source.includes('\\') || (source.match(/\$/g) || []).length % 2) return source;
+  return source.split(TIDY_WRITTEN).map((part, index) => (index % 2 ? part : wrapRuns(literalNewlines(part)))).join('');
+}
+
 // text：说明文字；返回同一段话，公式写在 $…$ 里（交给 renderMath 排）
 export function autoMath(text) {
   const source = String(text ?? '');

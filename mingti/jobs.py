@@ -53,11 +53,13 @@ class Job:
         self.result: dict | None = None
         self.error: str | None = None
         self.stop_requested = False
-        # 兜底上限：难题偶尔会一轮轮返工下去。超过就停下并说明，不让人干等十分钟最后还是失败
+        # 兜底上限：难题偶尔会一轮轮返工下去。到了上限，手里有写完的解析就交付最好的一版；
+        # 还什么都没有时多等一半的时间，尽量让用户拿到题
         self.max_calls = 70 + 30 * (config["lanes"] - 1)
         # 极高档每次都想得更久，时间上限放宽到 20 分钟
         self.max_seconds = 1200 if config.get("thinking") == "max" else 480
         self.over_budget = False
+        self.has_candidate = False
         self._halt = threading.Event()
         # 用户点停止时，连同正在进行的模型请求一起掐断（见 abort.py）
         self.abort_scope = AbortScope()
@@ -83,6 +85,10 @@ class Job:
     def halt(self) -> None:
         self._halt.set()
 
+    def candidate_ready(self) -> None:
+        with self.lock:
+            self.has_candidate = True
+
     def lane_status(self, lane: str, status: str, note: str = "") -> None:
         with self.lock:
             info = self.lanes[lane]
@@ -94,7 +100,9 @@ class Job:
             if status == "won":
                 self.winner = lane
         several = len(self.lanes) > 1
-        if status == "won":
+        if status == "won" and note:  # 返工到上限：交付最好的一版，note 是还没解决的复核意见
+            self.event(lane, "check", "note", "复核还有意见没解决，先把最好的一版交给你，用之前请核对", [note])
+        elif status == "won":
             self.event(lane, "check", "pass", f"采用方案 {lane}，其余方案停下" if several else "全部检查通过")
         elif status == "failed":
             self.event(lane, "check", "reject", f"方案 {lane} 没出成：{note}" if several else f"没出成：{note}")
@@ -134,17 +142,19 @@ class Job:
                 if not self.finished_at:
                     self.calls.append(call)
                 elapsed = time.time() - (self.started_at or time.time())
+                allow = 1 if self.has_candidate else 1.5
                 if self.winner is None and not self.over_budget and (
-                    len(self.calls) > self.max_calls or elapsed > self.max_seconds
+                    len(self.calls) > self.max_calls * allow or elapsed > self.max_seconds * allow
                 ):
                     self.over_budget = exceeded = True
             else:
                 call.update(updates)
         if exceeded:
             self.halt()
+            ending = "不再返工，交付目前最好的一版" if self.has_candidate else "还没出成，先停下"
             self.event(
                 self.winner or "A", "check", "reject",
-                f"已经调用模型 {len(self.calls)} 次、用时 {round(elapsed / 60, 1)} 分钟还没出成，先停下",
+                f"已经调用模型 {len(self.calls)} 次、用时 {round(elapsed / 60, 1)} 分钟，{ending}",
             )
 
     def _offset(self, moment: float) -> float:
@@ -233,6 +243,7 @@ class Job:
                 "role": current["role"] if current else None,
                 "stem": stem[:600],
                 "error": self.error,
+                "flagged": bool(self.result and self.result.get("solution_issue")),
             }
 
     def record(self) -> dict:

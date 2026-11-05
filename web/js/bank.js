@@ -10,6 +10,27 @@ import { openImporter } from './importer.js';
 
 const CHOICE = new Set(['single_choice', 'multiple_choice']);
 const oneLine = (text) => String(text || '').replace(/\$\$/g, '$').replace(/\s*\n+\s*/g, ' ');
+
+// 题库列表里每道题只显示两行。按大概的宽度在公式外面先截断：只靠 CSS 的行数限制时，
+// 截在一个公式中间，省略号后面会露出半截下标（"…ₙ₊₁"）
+function clipStem(text, budget = 60) {
+  const source = oneLine(text);
+  let used = 0;
+  for (let i = 0; i < source.length; i += 1) {
+    if (source[i] === '$') {
+      const end = source.indexOf('$', i + 1);
+      if (end < 0) break;
+      const body = source.slice(i + 1, end).replace(/\\[a-zA-Z]+/g, 'x').replace(/[{}^_\s\\]/g, '');
+      used += Math.max(1, body.length * 0.55);
+      if (used > budget) return `${source.slice(0, i).trimEnd()}…`;
+      i = end;
+      continue;
+    }
+    used += source.charCodeAt(i) < 0x2e80 ? 0.55 : 1;
+    if (used > budget) return `${source.slice(0, i).trimEnd()}…`;
+  }
+  return source;
+}
 const GROUP_KEY = 'mingti.bank-grouped';
 const samePath = (a, b) => a.length === b.length && a.every((part, i) => part === b[i]);
 const startsWith = (path, prefix) => prefix.every((part, i) => path[i] === part);
@@ -31,6 +52,7 @@ export function asDraft(item) {
     full_solution_steps: item.full_solution_steps,
     figure_svg: item.figure_svg,
     imported: item.imported,
+    solution_issue: item.solution_issue,
   };
 }
 
@@ -358,10 +380,11 @@ export class Library {
       const meta = el('span', 'bank-meta');
       meta.append(el('span', 'kind', TYPE_LABEL[item.question_type] || ''), el('span', '', DIFFICULTY_LABEL[item.difficulty] || ''));
       if (item.knowledge) meta.append(el('span', 'where', item.knowledge.split(' › ').pop()));
+      if (item.solution_issue) meta.append(el('span', 'edited flagged', '待核对'));
       if (item.imported) meta.append(el('span', 'edited', '导入'));
       if (item.edited) meta.append(el('span', 'edited', '改过'));
       meta.append(el('span', 'when', formatWhen(item.created_at)));
-      open.append(meta, mathText('span', 'bank-stem', oneLine(item.stem)));
+      open.append(meta, mathText('span', 'bank-stem', clipStem(item.stem)));
       open.addEventListener('click', () => this.select(item.id));
       row.append(pick, open);
       this.list.append(row);

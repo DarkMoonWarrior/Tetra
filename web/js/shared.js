@@ -1,8 +1,8 @@
 // 公共常量与小工具
 
-import { autoMath } from './automath.js';
+import { autoMath, tidyMath } from './automath.js';
 
-export { autoMath };
+export { autoMath, tidyMath };
 
 export const TYPE_LABEL = {
   single_choice: '单选题',
@@ -289,10 +289,11 @@ export function el(tag, className, text) {
   return node;
 }
 
+// 题目内容（题干、选项、答案、解析）：漏写 $ 的公式在显示时补上（见 automath.js 的 tidyMath）
 export function mathText(tag, className, text) {
   const node = el(tag, className);
   node.style.whiteSpace = 'pre-line';
-  node.textContent = text || '';
+  node.textContent = tidyMath(text || '');
   return node;
 }
 
@@ -429,7 +430,7 @@ export function roleOfStage(stage) {
   if (s.startsWith('solution-condense')) return 'editor';
   if (s.startsWith('figure-')) return 'illustrator';
   if (s === 'question-review' || s === 'solution-regeneration-question-review' || /-review-check(?:-\d+)?$/.test(s)) return 'reviewer';
-  if (s.startsWith('completed-solution-review') || s.startsWith('solution-regeneration-verification')) return 'auditor';
+  if (s.startsWith('completed-solution-review') || s.startsWith('solution-regeneration-verification') || s.startsWith('solution-scope-review')) return 'auditor';
   if (s.startsWith('solution-')) return 'solver';
   return 'composer';
 }
@@ -455,6 +456,10 @@ export function describeStage(stage) {
   else if ((m = s.match(/^solution-section-(\d+)-cleanup$/))) text = `润色第 ${m[1]} 部分`;
   else if ((m = s.match(/^solution-section-(\d+)$/))) text = `写第 ${m[1]} 部分解析`;
   else if (s === 'solution-conclusion') text = '得出最终答案';
+  else if ((m = s.match(/^solution-repair-(\d+)$/))) { text = `按复核意见修改解析（第 ${m[1]} 轮）`; repair = true; }
+  else if (/^solution-conclusion-repair-\d+$/.test(s)) text = '核对修改后的答案';
+  else if (/^completed-solution-review-repair-\d+$/.test(s)) text = '复核修改后的解析';
+  else if (/^solution-scope-review(?:-\d+)?$/.test(s)) text = '判断超纲的地方能不能用高中方法';
   else if (s === 'solution-condense') text = '整理成标准答案的写法';
   else if (s === 'figure-draw') text = '按题干画配图';
   else if (s === 'figure-redraw') { text = '按核对意见重画配图'; repair = true; }

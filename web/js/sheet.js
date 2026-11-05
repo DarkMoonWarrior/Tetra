@@ -1,7 +1,7 @@
 // 题目：把题干、答案和解析排成教辅上印的样子。
 // 这是给老师直接用的，只放题目本身；审题、复核这些过程信息留在中间的出题过程里。
 
-import { DIFFICULTY_LABEL, TYPE_LABEL, autoMath, el, mathText, normalize, pips } from './shared.js';
+import { DIFFICULTY_LABEL, TYPE_LABEL, autoMath, el, mathText, normalize, pips, tidyMath } from './shared.js';
 
 export function optionColumns(options) {
   const longest = Math.max(
@@ -74,6 +74,12 @@ export function buildSheet(draft, { brief = {}, meta = {}, preview = false, reve
   }
 
   paper.append(el('div', 'answer-rule', '答案与解析'));
+  // 返工到上限时交付的题：写明复核还有什么意见没解决，老师知道该核对哪里
+  if (draft.solution_issue) {
+    const notice = mathText('p', 'review-notice', '');
+    notice.append(el('b', '', '待核对　'), document.createTextNode(`复核还有意见没解决：${autoMath(draft.solution_issue)}`));
+    paper.append(notice);
+  }
   // 答案、分析、详解三段用同一种字体字号，开头都是加粗的标签
   const answerRow = el('p', 'answer-row print');
   answerRow.append(el('b', '', '答案　'));
@@ -98,7 +104,7 @@ export function buildSheet(draft, { brief = {}, meta = {}, preview = false, reve
     (draft.solution_steps || []).forEach((step, index) => {
       const line = mathText('p', '', '');
       if (index === 0) line.append(el('b', '', '详解　'));
-      line.append(document.createTextNode(step));
+      line.append(document.createTextNode(tidyMath(step)));
       lines.append(line);
     });
     paper.append(lines);

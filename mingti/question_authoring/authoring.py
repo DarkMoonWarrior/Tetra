@@ -6,6 +6,7 @@ from typing import Callable
 from uuid import uuid4
 
 from mingti.curriculum import InMemoryCurriculumCatalog
+from mingti.math_content import tidy_math_text
 from mingti.math_verifier import MathVerifier
 from mingti.question_authoring.providers import (
     PROMPT_REVISION,
@@ -26,7 +27,7 @@ from mingti.question_authoring.schemas import (
     QuestionDraftVerification,
     QuestionType,
 )
-from mingti.question_authoring.scope import beyond_curriculum_methods, university_only_terms
+from mingti.question_authoring.scope import scope_violations, university_only_terms
 
 
 class QuestionAuthoringError(ValueError):
@@ -86,7 +87,8 @@ class QuestionAuthoring:
             )
         except QuestionAuthoringProviderError as exc:
             raise QuestionAuthoringUnavailableError(str(exc)) from exc
-        if content.solution_status != "ready":
+        open_issues = content.solution_status == "open_review_issues"
+        if content.solution_status != "ready" and not open_issues:
             raise QuestionAuthoringUnavailableError(
                 "命题模型未能交付完整且通过一致性审核的题目，系统不会返回半成品"
             )
@@ -112,7 +114,9 @@ class QuestionAuthoring:
                 + "；".join(failed)
             )
         warnings = [
-            "本题已完成题面、解析与解析所得答案的内部闭环审核；教师仍可按教学需要自主修改。",
+            f"复核还有意见没解决，使用前请核对：{content.solution_issue}"
+            if open_issues
+            else "本题已完成题面、解析与解析所得答案的内部闭环审核；教师仍可按教学需要自主修改。",
             "当前草稿尚未保存，仅自己可见；不会进入公共题库或公共搜索。",
             "预计难度来自模型判断，不是统计校准或程序验证结果。",
         ]
@@ -605,12 +609,26 @@ class QuestionAuthoring:
             update={"answer_value": content.final_answer.strip()}
         )
 
+    @staticmethod
+    def _tidy_math(content: ProviderQuestionDraft) -> ProviderQuestionDraft:
+        """模型漏写的 $ 补上、多转义的 \\n 换回换行（见 math_content.tidy_math_text），存下来的就是能直接排版的内容。"""
+        return content.model_copy(
+            update={
+                "stem_latex": tidy_math_text(content.stem_latex) if content.stem_latex else content.stem_latex,
+                "options": [option.model_copy(update={"text": tidy_math_text(option.text)}) for option in content.options],
+                "answer_value": tidy_math_text(content.answer_value),
+                "final_answer": tidy_math_text(content.final_answer),
+                "solution_method": tidy_math_text(content.solution_method),
+                "solution_steps": [tidy_math_text(step) for step in content.solution_steps],
+            }
+        )
+
     @classmethod
     def _canonicalize_generated_content(
         cls,
         content: ProviderQuestionDraft,
     ) -> ProviderQuestionDraft:
-        content = cls._canonicalize_answer(content)
+        content = cls._canonicalize_answer(cls._tidy_math(content))
         if content.question_type not in {"single_choice", "multiple_choice"}:
             return content
         options = [
@@ -671,7 +689,9 @@ class QuestionAuthoring:
             *content.knowledge_points,
             *content.assessed_methods,
         )
-        violations = university_only_terms(*parts) + beyond_curriculum_methods(*parts)
+        # 出题流程里每一步都用同一套规则查过、交给对应的角色改过（providers._check_solution_scope 等），
+        # 知识点这些标签里的大学名词也已经去掉；这里是最后一道保险，正常不会拦下
+        violations = scope_violations(*parts)
         if violations:
             raise QuestionAuthoringError(
                 "生成内容超出高中数学范围：" + "、".join(violations)
@@ -791,6 +811,15 @@ class QuestionAuthoring:
                 evidence_source="deterministic_structure",
                 summary="题目、解析与解析所得标准答案存在已知冲突或解析未完成",
                 details=[content.solution_issue or "解析需要教师独立核验。"],
+            )
+        if content.solution_status == "open_review_issues":
+            return QuestionDraftTrustCheck(
+                code="answer_solution_consistency",
+                status="inconclusive",
+                capability="supported",
+                evidence_source="deterministic_structure",
+                summary="复核还有意见没解决，交给老师核对",
+                details=[content.solution_issue or "解析需要教师核对。"],
             )
         if content.question_type in {"single_choice", "multiple_choice"}:
             answer_keys = cls._answer_keys(content.answer_value)

@@ -188,7 +188,19 @@ export class Turn {
     const followups = el('div', 'followups');
     const level = snap.brief?.target_difficulty || 3;
 
-    if (snap.status === 'succeeded') {
+    if (snap.status === 'succeeded' && snap.result?.solution_issue) {
+      // 返工到上限：题交给你，但要说清楚不是全部通过
+      this.outcome.className = 'outcome';
+      this.outcome.append(
+        el('p', '', `题目出好了，但复核还有意见没解决，用之前请核对。用时 ${Math.max(1, Math.round(snap.elapsed))} 秒。`),
+        el('p', '', '具体的意见写在右边的题目里。题目已经收进题库，标了“待核对”，改过以后标记会去掉。'),
+      );
+      followups.append(
+        this.followup('再出一道同类题', 'again'),
+        this.followup('简单一点', 'easier', level <= 1),
+        button('在题库里查看', 'followup', () => this.actions.openBank(this)),
+      );
+    } else if (snap.status === 'succeeded') {
       this.outcome.className = 'outcome ok';
       const verified = count('verifier', 'pass') > 0;
       const fixes = [
@@ -209,7 +221,7 @@ export class Turn {
       this.outcome.className = 'outcome bad';
       this.outcome.append(
         el('p', '', legacyText(snap.error) || '没能得到通过全部检查的题。'),
-        el('p', '', '可以换一个考点，或者降一档难度再试。'),
+        el('p', '', '再试时会带上这次没出成的原因，命题员会避开同样的问题；也可以降一档难度，或者换一个考点。'),
       );
       followups.append(this.followup('再试一次', 'retry'), this.followup('简单一点再试', 'easier', level <= 1));
     } else {
