@@ -8,10 +8,7 @@
 
 一句话出题、组卷、导出试卷。每道题都经过多个 AI 角色独立求解和交叉核对，通过了才交到你手上。
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
-![Version](https://img.shields.io/badge/version-0.1.0-555555)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![Version](https://img.shields.io/badge/version-0.1.0-555555)
 
 [快速开始](#快速开始) · [功能](#功能) · [工作原理](#工作原理) · [使用手册](docs/user-guide.md) · [架构说明](docs/architecture.md) · [开发指南](docs/development.md)
 
@@ -32,9 +29,9 @@ Tetra 运行在你自己的电脑上，题库和试卷都存在本机，模型�
 ## 为什么选择 Tetra
 
 - **答案要对得上才算数。** 审题员、复核员和可选的验算员都从题面独立求解，和解析的答案对不上就退回或重出。
-- **内容不超纲。** 按人教 A 版、B 版的知识体系出题，覆盖 302 个知识点；解析用了定积分、洛必达法则、泰勒展开这类方法会被退回，改用高中方法重写。
+- **超纲方法会被拦下。** 按人教 A 版、B 版的知识体系出题，覆盖 302 个知识点；解析用了定积分、洛必达法则、泰勒展开这类方法会被退回，改用高中方法重写。
 - **一句话走完全流程。** 说“组一套高一期末试卷”，它会定双向细目表、从题库挑题、现场补齐缺的题，再排成标准试卷。
-- **成品可以直接用。** 解析按【分析】【详解】的试卷格式整理；试卷按高考版式排版；Word 里的公式是原生公式，可以继续修改。
+- **格式不用再调。** 解析按【分析】【详解】的试卷格式整理；试卷按高考版式排版；Word 里的公式是原生公式，可以继续修改。
 - **过程看得见。** 每个角色的进度、每条审题意见和退回原因都有记录，还能回放整个出题过程。想停随时停，点一下就断开正在进行的模型请求。
 - **模型和数据都在你手里。** DeepSeek、智谱 GLM、OpenAI、Claude 填上 API Key 就能用，其他兼容 OpenAI 接口的服务也能接入；题库和试卷只存在本机。
 
@@ -109,15 +106,16 @@ Tetra 运行在你自己的电脑上，题库和试卷都存在本机，模型�
 
 ```mermaid
 flowchart LR
-    A([你的要求]) --> B[命题员<br/>先构造，后成题]
-    B --> C[审题员<br/>查条件和超纲<br/>独立求解]
+    A([你的要求]) --> B[命题员]
+    B --> C[审题员]
     C -- 有问题 --> B
-    C --> D[解题员<br/>只用高中方法<br/>写完整解析]
-    D --> E[复核员<br/>从题面重新求解]
+    C --> D[解题员]
+    D --> E[复核员]
     E -- 解析有误 --> D
     E -- 题面有误 --> B
-    E --> F[整理员 / 配图员<br/>标准解析与配图]
-    F --> G[(题库)]
+    E --> F[整理员]
+    F --> G[配图员]
+    G --> H[(题库)]
 ```
 
 | 角色 | 做什么 |
@@ -178,7 +176,7 @@ tetra
 费用由你接入的模型服务收取。一道题通常消耗几万到十几万 Token，题目越难、检查越严，用量越大。
 
 **出的题一定正确吗？**
-不能保证。多角色核对能拦住大部分错误，但模型仍可能出错，用于教学和考试之前请老师审阅。
+不能保证。多角色核对能减少错误，但模型仍可能出错，用于教学和考试之前请老师审阅。
 
 **能多人一起用吗？**
 目前是单机应用，没有账号和权限控制，每个人在自己的电脑上运行，数据各自一份。
