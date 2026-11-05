@@ -28,7 +28,7 @@ from mingti.assistant import CHAT_THINKING
 from mingti.bank import Paper, PaperItem
 from mingti.config import CURRICULA
 from mingti.question_authoring import PROMPT_REVISION, DeepSeekQuestionAuthoringProvider, QuestionDesignBrief
-from mingti.tracking import JobRecorder
+from mingti.tracking import AbortScope, JobRecorder
 
 logger = logging.getLogger("mingti.assemble")
 
@@ -201,6 +201,7 @@ class Assembly:
         self.used_ids: set[str] = set()  # 按方案从题库挑中的题
         self.plan_usage: list[dict] = []
         self.stop_requested = False
+        self.abort_scope = AbortScope()  # 点停止时，定方案那次调用也当场掐断
         self.created_at = time.time()
         self.finished_at: float | None = None
         self.message_id = f"m_{uuid.uuid4().hex[:12]}"
@@ -243,6 +244,7 @@ class AssemblyManager:
         if assembly is None:
             return False
         assembly.stop_requested = True
+        assembly.abort_scope.abort()
         for job_id in list(assembly.job_ids):
             self.jobs.stop(job_id)
         return True
@@ -368,7 +370,7 @@ class AssemblyManager:
                     assembly.plan_usage.append(updates)
 
         recorder = JobRecorder(self.jobs.model_runs, listen, lane="A", role_of=lambda _stage: "planner",
-                               should_stop=lambda: assembly.stop_requested)
+                               should_stop=lambda: assembly.stop_requested, abort_scope=assembly.abort_scope)
         # 定方案只有一次调用：按思考强度，中 = 想一会儿，高 = 正常思考，极高 = 最深的一档
         thinking = CHAT_THINKING.get(assembly.config.get("thinking"), "light")
         try:
@@ -573,7 +575,7 @@ class AssemblyManager:
             while job.finished_at is None:
                 if assembly.stop_requested:
                     self.jobs.stop(job.id)
-                time.sleep(0.5)
+                time.sleep(0.1)
             if job.status == "succeeded":
                 item = self.bank.add_from_record(job.record())  # 出题流程自己也会收进题库；同一道题只收一次
                 if item is not None:

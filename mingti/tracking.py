@@ -11,15 +11,13 @@ import time
 from contextlib import contextmanager
 from typing import Callable, Iterator
 
+from mingti import abort
+from mingti.abort import AbortScope, StopRequested  # noqa: F401 - StopRequested 以前定义在这里，别处还从这里导入
 from mingti.model_operations import ModelRunRecorder
 
 # listener(event, call, updates)：event 为 "start" 或 "end"；
 # "end" 时由监听者在自己的锁里把 updates 合并进 call，避免界面读取时数据被并发修改。
 CallListener = Callable[[str, dict, dict], None]
-
-
-class StopRequested(Exception):
-    """别的命题组已经交卷，或用户点了停止：在下一次调用模型前结束。"""
 
 
 class _SpanProxy:
@@ -47,12 +45,15 @@ class JobRecorder:
         lane: str = "A",
         role_of: Callable[[str], str] = lambda stage: "composer",
         should_stop: Callable[[], bool] = lambda: False,
+        abort_scope: AbortScope | None = None,
     ) -> None:
+        """abort_scope：用户点停止时连同正在进行的请求一起掐断（见 abort.py）；不给就等这次调用结束再停。"""
         self._base = base
         self._listener = listener
         self._lane = lane
         self._role_of = role_of
         self._should_stop = should_stop
+        self._abort_scope = abort_scope
 
     @contextmanager
     def track(
@@ -65,7 +66,7 @@ class JobRecorder:
         actor_id: str | None = None,
         validation_owner_id: str | None = None,
     ) -> Iterator[_SpanProxy]:
-        if self._should_stop():
+        if self._should_stop() or (self._abort_scope is not None and self._abort_scope.aborted):
             raise StopRequested()
         stage = prompt_version.partition(":")[2] or "single"
         call = {
@@ -86,7 +87,7 @@ class JobRecorder:
                 prompt_version=prompt_version,
                 actor_id=actor_id,
                 validation_owner_id=validation_owner_id,
-            ) as span:
+            ) as span, abort.active(self._abort_scope):
                 yield _SpanProxy(span, usage)
             ok = True
         finally:

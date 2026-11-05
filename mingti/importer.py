@@ -23,6 +23,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+from mingti import abort
 from mingti.deepseek import DeepSeekClientError
 
 logger = logging.getLogger("mingti.importer")
@@ -326,6 +327,7 @@ class ImportJob:
         self.errors: dict[int, str] = {}
         self.status = "running"
         self.stop_requested = False
+        self.abort_scope = abort.AbortScope()  # 点停止时，正在识别、补写的请求当场掐断
         self.saved = 0
         self.created_at = time.time()
         self.finished_at: float | None = None
@@ -379,6 +381,7 @@ class ImportManager:
         if job is None:
             return False
         job.stop_requested = True
+        job.abort_scope.abort()
         return True
 
     # ---- 识别 ----
@@ -404,18 +407,21 @@ class ImportManager:
                 return
             page = job.pages[number]
             try:
-                raw = route.client.request(
-                    instructions=instructions,
-                    input_text=f"这是《{page['file']}》第 {page['page']} 页（共识别 {len(job.pages)} 页中的第 {number + 1} 页）。",
-                    action="识别题目",
-                    image_data_url=_data_url(page["png"]),
-                    max_tokens=8000,
-                )
+                with abort.active(job.abort_scope):
+                    raw = route.client.request(
+                        instructions=instructions,
+                        input_text=f"这是《{page['file']}》第 {page['page']} 页（共识别 {len(job.pages)} 页中的第 {number + 1} 页）。",
+                        action="识别题目",
+                        image_data_url=_data_url(page["png"]),
+                        max_tokens=8000,
+                    )
                 payload = json.loads(raw["output"][0]["content"][0]["text"])
                 payload = payload if isinstance(payload, dict) else {}
                 _attach_figures(payload, page)
                 with job.lock:
                     job.results[number] = payload
+            except abort.StopRequested:
+                return
             except (DeepSeekClientError, ValueError, KeyError, IndexError, TypeError) as exc:
                 with job.lock:
                     job.errors[number] = str(exc)[:300]
@@ -456,10 +462,15 @@ class ImportManager:
             if job.stop_requested:
                 return
             try:
-                result = complete_solution(item, route, thinking)
+                with abort.active(job.abort_scope):
+                    result = complete_solution(item, route, thinking)
                 with job.lock:
                     job.extra[item["index"]] = result
+            except abort.StopRequested:
+                return
             except Exception as exc:  # noqa: BLE001 - 一道题没补成不影响别的
+                if job.stop_requested:
+                    return
                 with job.lock:
                     job.extra_errors[item["index"]] = str(exc)[:200]
 

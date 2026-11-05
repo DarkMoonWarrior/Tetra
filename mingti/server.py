@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -223,11 +224,23 @@ def job_status(job_id: str) -> dict:
     return job.snapshot()
 
 
+def _settle(task, seconds: float = 3.0) -> str:
+    """点了停止：正在进行的请求已经掐断，等后台线程收完尾（一般零点几秒），界面接着读到的就是"已停下"。"""
+    done = getattr(task, "done", None)
+    if done is not None:
+        done.wait(seconds)
+    else:
+        deadline = time.monotonic() + seconds
+        while task.finished_at is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+    return task.status
+
+
 @app.post("/api/jobs/{job_id}/stop")
 def stop_job(job_id: str) -> dict:
     if not manager.stop(job_id):
         raise HTTPException(404, "任务不存在")
-    return {"stopping": True}
+    return {"stopped": True, "status": _settle(manager.get(job_id))}
 
 
 # ---------- 批量出题：同一份要求一次出好几道 ----------
@@ -257,7 +270,7 @@ def batch_status(batch_id: str) -> dict:
 def stop_batch(batch_id: str) -> dict:
     if not manager.stop_batch(batch_id):
         raise HTTPException(404, "任务不存在")
-    return {"stopping": True}
+    return {"stopped": True, "status": _settle(manager.get_batch(batch_id))}
 
 
 # ---------- 对话助手：先判断是聊天、出题还是组卷；聊天直接回答 ----------
@@ -496,8 +509,9 @@ def assembly_status(assembly_id: str) -> dict:
 
 @app.post("/api/assemblies/{assembly_id}/stop")
 def stop_assembly(assembly_id: str) -> dict:
-    assemblies.stop(_assembly_or_404(assembly_id).id)
-    return {"stopping": True}
+    assembly = _assembly_or_404(assembly_id)
+    assemblies.stop(assembly.id)
+    return {"stopped": True, "status": _settle(assembly)}
 
 
 @app.get("/api/questions")
@@ -760,8 +774,9 @@ def import_status(import_id: str) -> dict:
 
 @app.post("/api/imports/{import_id}/stop")
 def stop_import(import_id: str) -> dict:
-    importer.stop(_import_or_404(import_id).id)
-    return {"stopping": True}
+    job = _import_or_404(import_id)
+    importer.stop(job.id)
+    return {"stopped": True, "status": _settle(job)}
 
 
 @app.post("/api/imports/{import_id}/save")

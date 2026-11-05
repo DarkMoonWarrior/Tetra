@@ -1,13 +1,57 @@
 from __future__ import annotations
 
+import http.client
 import json
 import re
+import urllib.request
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from mingti import abort
 
 
 class DeepSeekClientError(RuntimeError):
     pass
+
+
+# ---- 发请求：连接登记到当前任务的 AbortScope，用户点停止时当场断开（见 abort.py） ----
+
+
+def _watch(connection: http.client.HTTPConnection) -> None:
+    scope = abort.current()
+    if scope is None or connection.sock is None:
+        return
+    try:
+        scope.watch_socket(connection.sock)
+    except abort.StopRequested:
+        connection.close()
+        raise
+
+
+class _AbortableHTTPConnection(http.client.HTTPConnection):
+    def connect(self) -> None:
+        super().connect()
+        _watch(self)
+
+
+class _AbortableHTTPSConnection(http.client.HTTPSConnection):
+    def connect(self) -> None:
+        super().connect()
+        _watch(self)
+
+
+class _HTTPHandler(urllib.request.HTTPHandler):
+    def do_open(self, http_class, req, **kwargs):  # noqa: ANN001, ANN201 - 和 urllib 的签名一致
+        return super().do_open(_AbortableHTTPConnection, req, **kwargs)
+
+
+class _HTTPSHandler(urllib.request.HTTPSHandler):
+    def do_open(self, http_class, req, **kwargs):  # noqa: ANN001, ANN201 - 和 urllib 的签名一致
+        return super().do_open(_AbortableHTTPSConnection, req, **kwargs)
+
+
+# 和 urlopen 用的默认 opener 一样（系统代理照常生效），只是连接换成可以掐断的
+_OPENER = urllib.request.build_opener(_HTTPHandler, _HTTPSHandler)
 
 
 # 常见的出错情况先说人话，原始信息放在括号里
@@ -263,10 +307,17 @@ class DeepSeekJsonClient:
             },
             method="POST",
         )
+        scope = abort.current()
+        if scope is not None:
+            scope.check()
         try:
-            with urlopen(request, timeout=timeout or self.timeout_seconds) as response:
+            with _OPENER.open(request, timeout=timeout or self.timeout_seconds) as response:
                 return json.loads(response.read().decode("utf-8"))
+        except abort.StopRequested:
+            raise
         except HTTPError as exc:
+            if abort.aborted():
+                raise abort.StopRequested() from exc
             details = exc.read().decode("utf-8", errors="replace")[:2000]
             try:
                 error = json.loads(details)["error"]
@@ -280,7 +331,10 @@ class DeepSeekJsonClient:
             if param and param in payload:
                 raise _UnsupportedParameter(param, failure) from exc
             raise failure from exc
-        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        except (URLError, TimeoutError, OSError, http.client.HTTPException, json.JSONDecodeError) as exc:
+            # 连接是用户点停止时掐断的：不是出错，报"停下了"
+            if abort.aborted():
+                raise abort.StopRequested() from exc
             raise DeepSeekClientError(f"模型{action}失败：{exc}") from exc
 
     @staticmethod

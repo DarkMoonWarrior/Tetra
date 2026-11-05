@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import anthropic
 
+from mingti import abort
 from mingti.deepseek import _HTTP_HINTS, DeepSeekClientError, DeepSeekJsonClient
 
 DEFAULT_BASE_URL = "https://api.anthropic.com"
@@ -136,11 +137,32 @@ class ClaudeJsonClient(DeepSeekJsonClient):
 
     def _stream(self, params: dict, timeout: float | None = None):
         sdk = self.sdk.with_options(timeout=float(timeout)) if timeout and timeout > self.timeout_seconds else self.sdk
-        if self.model in FALLBACK_MODELS:
-            with sdk.beta.messages.stream(**params, betas=[FALLBACK_BETA], fallbacks="default") as stream:
-                return stream.get_final_message()
-        with sdk.messages.stream(**params) as stream:
-            return stream.get_final_message()
+        # 用户点了停止：关掉这条流（见 abort.py），每收到一段也看一眼，停了就不再往下读
+        scope = abort.current()
+        if scope is not None:
+            scope.check()
+        manager = (
+            sdk.beta.messages.stream(**params, betas=[FALLBACK_BETA], fallbacks="default")
+            if self.model in FALLBACK_MODELS
+            else sdk.messages.stream(**params)
+        )
+        try:
+            with manager as stream:
+                token = scope.watch(stream.close) if scope is not None else None
+                try:
+                    for _event in stream:
+                        if scope is not None and scope.aborted:
+                            raise abort.StopRequested()
+                    return stream.get_final_message()
+                finally:
+                    if token is not None:
+                        scope.unwatch(token)
+        except abort.StopRequested:
+            raise
+        except Exception as exc:
+            if scope is not None and scope.aborted:
+                raise abort.StopRequested() from exc
+            raise
 
 
 def list_models(api_key: str, base_url: str = DEFAULT_BASE_URL, timeout: int = 15) -> list[str]:

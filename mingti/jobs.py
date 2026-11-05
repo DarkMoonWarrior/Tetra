@@ -22,7 +22,7 @@ from mingti.question_authoring import QuestionAuthoring, QuestionAuthoringError,
 from mingti.question_authoring.providers import THINK_LEVELS
 from mingti.store import QuestionStore, curriculum_label
 from mingti.team import LANE_IDS, ROLES, TeamProvider, role_of
-from mingti.tracking import JobRecorder
+from mingti.tracking import AbortScope, JobRecorder, StopRequested
 
 logger = logging.getLogger("mingti.jobs")
 
@@ -59,6 +59,9 @@ class Job:
         self.max_seconds = 1200 if config.get("thinking") == "max" else 480
         self.over_budget = False
         self._halt = threading.Event()
+        # 用户点停止时，连同正在进行的模型请求一起掐断（见 abort.py）
+        self.abort_scope = AbortScope()
+        self.done = threading.Event()  # 后台线程收尾完了（记录已经存好）
         self.lock = threading.Lock()
 
     # ---- team.TeamHooks ----
@@ -71,6 +74,7 @@ class Job:
             lane=lane,
             role_of=role_of,
             should_stop=(lambda: self.stop_requested) if after_win else self.should_stop,
+            abort_scope=self.abort_scope,
         )
 
     def should_stop(self) -> bool:
@@ -347,11 +351,13 @@ class JobManager:
             return self._jobs.get(job_id)
 
     def stop(self, job_id: str) -> bool:
+        """马上停：不再发新的请求，正在等回复的请求也当场掐断（不等它返回）。"""
         job = self.get(job_id)
         if job is None:
             return False
         job.stop_requested = True
         job.halt()
+        job.abort_scope.abort()
         return True
 
     # ---------- 批量出题 ----------
@@ -422,6 +428,8 @@ class JobManager:
                 job = self.submit(self._batch_brief(batch, index), meta, batch.config)
                 with batch.lock:
                     batch.job_ids.append(job.id)
+                if batch.stop_requested:  # 刚开出来就赶上点了停止
+                    self.stop(job.id)
                 # 等这一道写出题干（最多 45 秒）再开下一道，下一道就能避开它；有空位也不急着同时开
                 waited = 0.0
                 while (
@@ -431,7 +439,7 @@ class JobManager:
                     time.sleep(0.5)
                     waited += 0.5
             while any((job := self.get(job_id)) and job.finished_at is None for job_id in batch.job_ids):
-                time.sleep(0.5)
+                time.sleep(0.1)
         except Exception:  # noqa: BLE001 - 批量出题的调度出错时记下来，已经开始的题照常跑完
             logger.exception("批量出题 %s 调度出错", batch.id)
         finally:
@@ -478,10 +486,17 @@ class JobManager:
         if detail not in STYLES:
             return result
         lane = job.winner or "A"
+        if job.stop_requested:  # 题已经通过全部检查才点的停止：题照常交付，只是不再整理
+            job.event(lane, "editor", "note", "已停止：解析没有整理，保留解题员写的完整推导")
+            return result
         job.event(lane, "editor", "note", "把解析整理成标准答案的写法")
         tidied = condense(result, detail=detail, call=model_call(route, job.recorder_for(lane, after_win=True)))
         if tidied is result:
-            job.event(lane, "editor", "note", "解析没整理成，保留解题员写的完整推导")
+            job.event(
+                lane, "editor", "note",
+                "已停止：解析没有整理，保留解题员写的完整推导" if job.stop_requested
+                else "解析没整理成，保留解题员写的完整推导",
+            )
         else:
             job.event(
                 lane,
@@ -496,12 +511,21 @@ class JobManager:
         if not needs_figure(result, job.brief.model_dump(), job.meta):
             return result
         lane = job.winner or "A"
+        if job.stop_requested:
+            job.event(lane, "illustrator", "note", "已停止：这道题没有配图，可以在题库里点“配图”再画")
+            return result
         job.event(lane, "illustrator", "note", "这道题需要配图，按题干画一张")
         try:
             drawn = illustrate(result, call=model_call(route, job.recorder_for(lane, after_win=True)))
         except Exception:  # noqa: BLE001 - 配图出错不能连累已经审核通过的题
+            if job.stop_requested:
+                job.event(lane, "illustrator", "note", "已停止：这道题没有配图，可以在题库里点“配图”再画")
+                return result
             logger.exception("命题任务 %s 配图出错", job.id)
             drawn = {"spec": None, "svg": "", "problems": ["配图程序出错，详情记在服务日志里"], "redrawn": []}
+        if job.stop_requested and (drawn is None or drawn["spec"] is None):
+            job.event(lane, "illustrator", "note", "已停止：这道题没有配图，可以在题库里点“配图”再画")
+            return result
         if drawn is None:
             job.event(lane, "illustrator", "note", "配图员看过题目，认为这道题不需要配图")
             return result
@@ -544,16 +568,27 @@ class JobManager:
         except QuestionAuthoringError as exc:
             with job.lock:
                 job.error = (
-                    f"这道题返工太多次，调用了 {len(job.calls)} 次模型还没出成，为了不再久等先停下了。"
+                    "已按要求停止命题" if job.stop_requested
+                    else f"这道题返工太多次，调用了 {len(job.calls)} 次模型还没出成，为了不再久等先停下了。"
                     "可以降一档难度、换个考点，或者把要求写得具体一些再试；过程记录里能看到每次退回的原因"
                     if job.over_budget else str(exc)
                 )
                 job.status = "cancelled" if job.stop_requested else "failed"
-        except Exception as exc:  # noqa: BLE001 - 任何异常都要反馈到界面
-            logger.exception("命题任务 %s 异常", job.id)
+        except StopRequested:
             with job.lock:
-                job.error = f"内部错误：{exc}"
-                job.status = "failed"
+                job.error = "已按要求停止命题"
+                job.status = "cancelled"
+        except Exception as exc:  # noqa: BLE001 - 任何异常都要反馈到界面
+            # 点了停止以后掐断连接，可能从意想不到的地方报错：一律算停下了
+            if job.stop_requested:
+                with job.lock:
+                    job.error = "已按要求停止命题"
+                    job.status = "cancelled"
+            else:
+                logger.exception("命题任务 %s 异常", job.id)
+                with job.lock:
+                    job.error = f"内部错误：{exc}"
+                    job.status = "failed"
         finally:
             with job.lock:
                 job.finished_at = time.time()
@@ -561,11 +596,14 @@ class JobManager:
                 for info in job.lanes.values():
                     if info["status"] in ("waiting", "running"):
                         info["status"] = "stopped"
-            record = job.record()
-            self.store.save(record)
-            # 出好的题自动收进题库
-            if self.bank is not None and job.status == "succeeded":
-                try:
-                    self.bank.add_from_record(record)
-                except Exception:  # noqa: BLE001 - 收进题库失败不影响这次出题的结果
-                    logger.exception("命题任务 %s 没能收进题库", job.id)
+            try:
+                record = job.record()
+                self.store.save(record)
+                # 出好的题自动收进题库
+                if self.bank is not None and job.status == "succeeded":
+                    try:
+                        self.bank.add_from_record(record)
+                    except Exception:  # noqa: BLE001 - 收进题库失败不影响这次出题的结果
+                        logger.exception("命题任务 %s 没能收进题库", job.id)
+            finally:
+                job.done.set()
