@@ -136,10 +136,11 @@ export class BatchTurn {
   renderTask() {
     const { brief = {}, meta = {}, config } = this.request || {};
     this.task.innerHTML = '';
-    if (meta.follow_up) this.task.append(el('p', 'lead', meta.follow_up));
+    if (meta.said) this.task.append(el('p', 'said', meta.said));
+    else if (meta.follow_up) this.task.append(el('p', 'lead', meta.follow_up));
     const text = String(brief.request_text || '').replace(/^请出一道/, `请出 ${this.count} 道`);
     this.task.append(el('p', 'ask', text));
-    if (meta.note) this.task.append(el('p', 'extra', meta.note));
+    if (meta.note && meta.note !== meta.said) this.task.append(el('p', 'extra', meta.note));
     const tags = el('div', 'config');
     tags.append(el('span', '', `一次出 ${this.count} 道`));
     if (meta.knowledge_label) tags.append(el('span', '', meta.knowledge_label));

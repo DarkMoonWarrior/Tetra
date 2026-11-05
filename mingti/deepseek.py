@@ -24,6 +24,17 @@ _HTTP_HINTS = {
 }
 
 
+# LaTeX（KaTeX）里以 \n 开头的命令。读 JSON 时"\n"后面紧跟字母，拼出来是这些之一才当 LaTeX 命令，否则是换行
+LATEX_N_COMMANDS = frozenset(
+    """nabla natural ncong ne nearrow neg negthickspace negmedspace negthinspace neq newcommand newline nexists
+    ngeq ngeqq ngeqslant ngtr ni nleftarrow nLeftarrow nleftrightarrow nLeftrightarrow nleq nleqq nleqslant nless
+    nmid nobreak nobreakspace noexpand nolimits nonumber normalfont normalsize not notag notin notni nparallel nprec
+    npreceq nrightarrow nRightarrow nshortmid nshortparallel nsim nsubset nsubseteq nsubseteqq nsucc nsucceq
+    nsupset nsupseteq nsupseteqq ntriangleleft ntrianglelefteq ntriangleright ntrianglerighteq nu nvdash nvDash
+    nVdash nVDash nwarrow""".split()
+)
+
+
 class DeepSeekJsonResponseError(DeepSeekClientError):
     """The provider responded, but its model-generated JSON was unreadable."""
 
@@ -89,9 +100,11 @@ class DeepSeekJsonClient:
         image_data_url: str | None = None,
         recovery_instruction: str = "",
         thinking: bool | str = False,
+        image_data_urls: list[str] | None = None,
     ) -> dict:
         """thinking=True 时打开模型的思考模式：先在内部推演再输出，算得更准，但慢几秒、多用一些 Token；
-        thinking="max" 再请模型用最深的一档思考（思考强度"极高"），更慢，等待时间和输出上限都放宽。"""
+        thinking="max" 再请模型用最深的一档思考（思考强度"极高"），更慢，等待时间和输出上限都放宽；
+        thinking="light" 打开思考但用最轻的一档（聊天回答选"中"时）。"""
         schema_instruction = ""
         if output_schema:
             schema = output_schema.get("schema", output_schema)
@@ -103,13 +116,12 @@ class DeepSeekJsonClient:
             f"{instructions}{schema_instruction}\n必须只输出合法 JSON，不要使用 Markdown 代码块。"
         )
         user_content: str | list[dict[str, object]] = input_text
-        if image_data_url:
+        # 图片：一张（image_data_url，导入时一页一页地认）或者好几张（image_data_urls，聊天里一次发几张）
+        images = [url for url in [image_data_url, *(image_data_urls or [])] if url]
+        if images:
             user_content = [
                 {"type": "text", "text": input_text},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": image_data_url, "detail": "original"},
-                },
+                *({"type": "image_url", "image_url": {"url": url, "detail": "original"}} for url in images),
             ]
         messages: list[dict] = [{"role": "user", "content": user_content}]
         if self.thinking_style == "none":
@@ -164,15 +176,19 @@ class DeepSeekJsonClient:
         raise AssertionError("unreachable")
 
     def _thinking_params(self, thinking: bool | str) -> dict:
+        """thinking：False 不思考；"light" 想一会儿（模型最轻的一档，聊天回答选"中"时用）；True 正常思考；"max" 最深的一档。"""
         deepest = thinking == "max"
+        light = thinking == "light"
         if self.thinking_style == "thinking":
-            # DeepSeek 等：打开思考时默认强度是 high；极高档再写 reasoning_effort: max
+            # DeepSeek 等：打开思考时默认强度是 high；极高档写 reasoning_effort: max，"light" 写 low
             params = {"thinking": {"type": "enabled" if thinking else "disabled"}}
-            return {**params, "reasoning_effort": "max"} if deepest else params
+            if deepest:
+                return {**params, "reasoning_effort": "max"}
+            return {**params, "reasoning_effort": "low"} if light else params
         if self.thinking_style == "enable_thinking":
-            return {"enable_thinking": bool(thinking)}  # 只能开、关，极高和高一样
+            return {"enable_thinking": bool(thinking)}  # 只能开、关，极高、高和"light"都一样
         if self.thinking_style == "reasoning_effort":
-            return {"reasoning_effort": "max" if deepest else "high" if thinking else "low"}
+            return {"reasoning_effort": "max" if deepest else "low" if light else "high" if thinking else "low"}
         return {}
 
     def _complete(
@@ -338,7 +354,10 @@ class DeepSeekJsonClient:
 
     @staticmethod
     def _protect_latex_control_prefixes(value: str) -> str:
-        """Escape single LaTeX slashes that JSON would treat as controls."""
+        """Escape single LaTeX slashes that JSON would treat as controls.
+
+        \\n 后面跟字母的，只有拼出来是 LaTeX 里以 n 开头的命令（\\neq、\\nabla……）才当命令保留；
+        其余是模型写的换行（比如 cases 里换行后紧跟 x^2），照常当换行，不然公式里会多出一个认不出的"\\nx"。"""
         protected: list[str] = []
         index = 0
         length = len(value)
@@ -352,7 +371,9 @@ class DeepSeekJsonClient:
                 protected.append("\\\\")
                 index += 2
                 continue
-            command = re.match(r"[bfnrtu][A-Za-z]+\b", value[index + 1:])
+            command = re.match(r"[bfnrtu][A-Za-z]+", value[index + 1:])
+            if command and command.group(0)[0] == "n" and command.group(0) not in LATEX_N_COMMANDS:
+                command = None
             protected.append("\\\\" if command else "\\")
             index += 1
         return "".join(protected)

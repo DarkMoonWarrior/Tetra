@@ -8,16 +8,21 @@ import {
 } from './shared.js';
 import { buildSheet, draftAsText } from './sheet.js';
 import { Turn } from './turn.js';
-import { BatchItemSource, BatchTurn } from './batch.js';
+import { BatchItemSource, BatchTurn, shownLane } from './batch.js';
+import { ChatTurn, SummaryTurn, kilo } from './chat.js';
+import { PaperTurn } from './assembly.js';
+import { ImportTurn, importRecord } from './importcard.js';
 import { setGeometryBusy, startGeometry } from './geometry.js';
+import { isDark } from './theme.js';
+import { language, startI18n } from './i18n.js';
 import { initSplitters } from './split.js';
-import { Library } from './bank.js';
-import { Papers } from './paper.js';
+import { Library, asDraft } from './bank.js';
+import { Papers, downloadPaper } from './paper.js';
 import {
   initSettings, loadProfile, onProfileChange, openSettings, profile, refreshAccount, updateAgent,
 } from './settings.js';
 
-const FORM_KEY = 'mingti.form.v3';
+const FORM_KEY = 'mingti.form.v4'; // v4：出题选项默认不选（null），旧版存的选择不再沿用
 const JOB_KEY = 'mingti.job.v3';
 const CHAT_KEY = 'mingti.chat';
 const RAIL_KEY = 'mingti.rail-collapsed';
@@ -49,9 +54,10 @@ function pickExample() {
   writeStorage(localStorage, EXAMPLE_KEY, example);
 }
 pickExample(); // 每次打开页面先挑一条
+// 输入框：可以写出题要求、要一套试卷，也可以直接问问题；助手先判断是哪一种（见后端 assistant.py）
 const PLACEHOLDER = {
-  get idle() { return `补充要求写在这里，比如：${example}`; },
-  chat: '接着出下一道：可以先改题型、难度，再写新的要求；不写也行',
+  get idle() { return `说说想出什么题，比如：${example}；也可以让我组一套卷子，或者直接问我问题`; },
+  chat: '接着说：要出题、组卷，或者问问题都行；空着发送就按下面的设置出题',
 };
 const TYPE_NOTE = {
   single_choice: '四个选项，只有一个正确',
@@ -75,12 +81,19 @@ const state = {
   models: [],
   defaultModel: null,
   health: { ok: false, text: '正在连接模型' },
-  form: { topic: null, qtype: 'single_choice', difficulty: 3, grade: '', purpose: '课堂练习', mode: 'fast', thinking: 'high', count: 1 },
+  // 输入框下方的出题选项（考点、题型、难度、题量、年级、用途）默认都不选（null，题量是 1）：
+  // 不选就按个人设置里的默认出题；选了只管下一次出题，题出完（不管成没成）恢复成不选。
+  // 模型和思考强度不算在内，一直按你选的（聊天、出题都用）
+  form: { topic: null, qtype: null, difficulty: null, grade: null, purpose: null, mode: 'fast', thinking: 'medium', count: 1 },
   blueprint: null,
   mode: 'idle',
   chat: null, // 当前打开的对话 { id, turns }
   focus: null, // 右栏正在显示哪一轮
-  job: null, // 正在出的题 { id, chat }，同一时间只出一道
+  job: null, // 正在出的题 { id, chat, batch, paper }，同一时间只出一道（或一批、一份试卷）
+  pending: null, // 正在等助手回答的那句话 { turn, chat }
+  touched: false, // 上次发送以后，在输入框下方调过题型、难度这些出题选项
+  context: null, // 当前对话带给模型的前文有多长（/api/sessions/{id}/context）
+  attachments: [], // 输入框里准备发的附件 { key, name, kind, status, id, thumb, pages }
   liveSnapshot: null,
   snapshotAt: 0,
   pollTimer: null,
@@ -118,6 +131,9 @@ const ui = {
   historyList: $('#historyList'),
   popover: $('#popover'),
   send: $('#sendBtn'),
+  attachTray: $('#attachTray'),
+  attachInput: $('#attachInput'),
+  attachBtn: $('#attachBtn'),
   taskLine: $('#taskLine'),
   chips: {
     kp: $('#kpChip'),
@@ -125,6 +141,7 @@ const ui = {
     level: $('#levelChip'),
     count: $('#countChip'),
     use: $('#useChip'),
+    context: $('#ctxChip'),
     model: $('#modelChip'),
   },
 };
@@ -254,19 +271,48 @@ function topicHint(grade, qtype) {
     + `${recent.length ? `，尽量避开最近出过的：${recent.join('、')}` : ''}。`;
 }
 
-// extra：追问时附加的要求（比如"别和上一道重复"），不放进输入框。
-// 只选了题型、难度、年级和用途也能出题：没选考点也没写要求时，由模型在这个年级的范围里挑考点。
-function composeRequest({ extra = '', followUp = '' } = {}) {
+// 这一次出题实际用的设置：选了的按选的，没选的按个人设置里的默认（年级：选的 → 考点所在的年级 → 任教年级）
+function effective() {
   const f = state.form;
   const p = profile();
+  return {
+    qtype: f.qtype || p.defaults.question_type || 'single_choice',
+    difficulty: f.difficulty || p.defaults.difficulty || 3,
+    count: f.count || 1,
+    purpose: f.purpose || p.defaults.purpose || '课堂练习',
+    grade: f.grade || f.topic?.grade || p.grade || null,
+  };
+}
+
+// 出题选项的当前状态（出完题时看用户有没有在出题期间改过）
+function chipState() {
+  const f = state.form;
+  return JSON.stringify([f.topic?.id || null, f.qtype, f.difficulty, f.count, f.grade, f.purpose]);
+}
+
+// 出完一道（或一批）题：选项恢复成不选。sent 是发出时的状态，出题期间改过的就留着
+function clearChips(sent = null) {
+  if (sent !== null && sent !== chipState()) return;
+  Object.assign(state.form, { topic: null, qtype: null, difficulty: null, count: 1, grade: null, purpose: null });
+  state.blueprint = null;
+  afterFormChange();
+}
+
+// extra：追问时附加的要求（比如"别和上一道重复"），不放进输入框。
+// note：用户写的要求；不给就用输入框里的（助手判断是出题以后，输入框已经清空了，就把那句话传进来）。
+// 只选了题型、难度、年级和用途也能出题：没选考点也没写要求时，由模型在这个年级的范围里挑考点。
+function composeRequest({ extra = '', followUp = '', note: given, said = '' } = {}) {
+  const f = state.form;
+  const p = profile();
+  const eff = effective();
   const topic = f.topic;
-  const grade = f.grade || topic?.grade || null;
-  let text = `请出一道${grade || '高中'}数学${TYPE_LABEL[f.qtype]}`;
+  const { grade, qtype, difficulty, purpose } = eff;
+  let text = `请出一道${grade || '高中'}数学${TYPE_LABEL[qtype]}`;
   if (topic) text += `，考查「${topic.name}」`;
-  text += `，难度 ${f.difficulty}/5（${DIFFICULTY_LABEL[f.difficulty]}），用于${f.purpose}。`;
-  const note = ui.prompt.value.trim();
+  text += `，难度 ${difficulty}/5（${DIFFICULTY_LABEL[difficulty]}），用于${purpose}。`;
+  const note = (given ?? ui.prompt.value).trim();
   const openTopic = !topic && !note;
-  const constraints = [note, ...settingsConstraints(), openTopic ? topicHint(grade, f.qtype) : '', extra].filter(Boolean).join('\n');
+  const constraints = [note, ...settingsConstraints(), openTopic ? topicHint(grade, qtype) : '', extra].filter(Boolean).join('\n');
   return {
     ready: true,
     openTopic,
@@ -275,9 +321,9 @@ function composeRequest({ extra = '', followUp = '' } = {}) {
       grade,
       curriculum_node_id: topic?.kind === 'kp' ? topic.id : null,
       knowledge_point_query: topic?.name || null,
-      question_type: f.qtype,
-      target_difficulty: f.difficulty,
-      teaching_purpose: f.purpose,
+      question_type: qtype,
+      target_difficulty: difficulty,
+      teaching_purpose: purpose,
       additional_constraints: constraints.slice(0, 2000),
     },
     meta: {
@@ -285,6 +331,7 @@ function composeRequest({ extra = '', followUp = '' } = {}) {
       topic_id: topic?.id || null,
       open_topic: openTopic,
       note,
+      said: said || null, // 用户说的原话（助手判断是出题时）；note 是助手连同前文整理成的出题要求
       follow_up: followUp || null,
       detail: p.defaults.solution_detail,
       source: state.blueprint ? `blueprint:${state.blueprint.id}` : followUp ? 'follow-up' : 'manual',
@@ -292,7 +339,8 @@ function composeRequest({ extra = '', followUp = '' } = {}) {
     },
     config: {
       ...agentConfig(f.mode, { ...p.agent, model: mainModel()?.id }, state.models, state.defaultModel),
-      thinking: thinkingFor(f.difficulty, f.thinking),
+      // 出 4、5 星的题至少用高（选了极高就用极高）；聊天不受这一条限制
+      thinking: thinkingFor(difficulty, f.thinking),
     },
   };
 }
@@ -308,9 +356,10 @@ function modelTitle(model) {
   return model ? model.model : '没有可用的模型';
 }
 
+// 按钮上的文字包在 .chip-label 里：输入框窄的时候，没选的选项可以只留图标（见 app.css 的 @container）
 function setChip(chip, parts, isSet = false) {
   chip.innerHTML = '';
-  for (const part of parts) chip.append(typeof part === 'string' ? document.createTextNode(part) : part);
+  for (const part of parts) chip.append(typeof part === 'string' ? el('span', 'chip-label', part) : part);
   chip.insertAdjacentHTML('beforeend', svg('chevron').replace('<svg ', '<svg class="caret" '));
   chip.classList.toggle('set', isSet);
 }
@@ -323,26 +372,33 @@ function dots(level) {
 
 function refreshComposer() {
   const f = state.form;
+  const p = profile();
+  const eff = effective();
+  // 出题选项：没选时只写是哪一项（考点不限、题型、难度、题量、用途），选了才写选的值并加深
   const topicName = f.topic && f.topic.name.length > 10 ? `${f.topic.name.slice(0, 10)}…` : f.topic?.name;
   setChip(ui.chips.kp, [f.topic ? `考查 ${topicName}` : '考点不限'], Boolean(f.topic));
   ui.chips.kp.title = f.topic?.label || '可以不选：不选时按年级挑一个考点；想指定就点这里选';
-  setChip(ui.chips.type, [TYPE_LABEL[f.qtype]]);
-  setChip(ui.chips.level, [dots(f.difficulty), DIFFICULTY_LABEL[f.difficulty]]);
-  setChip(ui.chips.count, [`出 ${f.count} 道`], f.count > 1);
-  ui.chips.count.title = '一次出几道：同样的要求一次出好几道，每道都单独审核';
-  const grade = f.grade || f.topic?.grade || '';
-  setChip(ui.chips.use, [`${grade ? `${grade}，` : ''}${f.purpose}`]);
-  // 模型和思考强度合在一个按钮上："deepseek-flash · 思考 高"；"思考"和档位分开写、颜色深浅不同，
-  // 免得"思考中"读成"正在思考"。4、5 星的题至少用高：停在高这一档时前面加一把小锁，表示不能再低
+  setChip(ui.chips.type, [f.qtype ? TYPE_LABEL[f.qtype] : '题型'], Boolean(f.qtype));
+  ui.chips.type.title = f.qtype ? '这次出题用的题型，出完恢复不选' : `不选就按个人设置：${TYPE_LABEL[eff.qtype]}；也可以直接在输入框里说`;
+  setChip(ui.chips.level, [dots(f.difficulty || 0), f.difficulty ? DIFFICULTY_LABEL[f.difficulty] : '难度'], Boolean(f.difficulty));
+  ui.chips.level.title = f.difficulty ? '这次出题用的难度，出完恢复不选' : `不选就按个人设置：${DIFFICULTY_LABEL[eff.difficulty]}`;
+  setChip(ui.chips.count, [f.count > 1 ? `出 ${f.count} 道` : '题量'], f.count > 1);
+  ui.chips.count.title = '一次出几道：同样的要求一次出好几道，每道都单独审核；不选是 1 道';
+  const use = [f.grade, f.purpose].filter(Boolean).join('，');
+  setChip(ui.chips.use, [use || '用途'], Boolean(use));
+  ui.chips.use.title = use ? '这次出题的年级和用途，出完恢复不选'
+    : `年级和用途：不选就按考点所在的年级（或任教年级${p.grade ? ` ${p.grade}` : ''}），用途按个人设置：${eff.purpose}`;
+  // 模型和思考强度合在一个按钮上："deepseek-flash · 思考 中"；"思考"和档位分开写、颜色深浅不同，
+  // 免得"思考中"读成"正在思考"。显示的就是你选的那一档，聊天按它回答；出 4、5 星的题时至少用高（在提示里说明）
   const model = mainModel();
-  const thinking = thinkingFor(f.difficulty, f.thinking);
-  const hard = f.difficulty >= FORCE_THINKING_FROM;
-  const think = el('span', 'chip-think');
-  if (hard && thinking === 'high') think.innerHTML = svg('lock').replace('<svg ', '<svg class="lock" ');
+  const thinking = THINKING[f.thinking] ? f.thinking : 'medium';
+  const raised = thinkingFor(eff.difficulty, thinking) !== thinking;
+  const think = el('span', thinking === 'max' ? 'chip-think max' : 'chip-think'); // 极高：档位名用和滑块一样的渐变色
   think.append(el('span', '', '思考'), el('b', '', THINKING[thinking].name));
   setChip(ui.chips.model, model ? [modelTitle(model), think] : [modelTitle(model)]);
   ui.chips.model.title = !model ? '还没有可用的模型'
-    : hard ? `切换模型和思考强度；${DIFFICULTY_LABEL[f.difficulty]}题至少用高思考强度` : '切换模型和思考强度';
+    : raised ? `切换模型和思考强度。聊天按${THINKING[thinking].name}；这次出${DIFFICULTY_LABEL[eff.difficulty]}题会用高`
+      : '切换模型和思考强度（聊天和出题都按这一档）';
 
   const { brief, openTopic } = composeRequest();
   ui.taskLine.innerHTML = '';
@@ -354,10 +410,15 @@ function refreshComposer() {
   if (many) ui.taskLine.append(document.createTextNode('每道题单独出、单独审核，互不重复。'));
   if (openTopic) ui.taskLine.append(document.createTextNode('考点不限，会在这个年级的范围里挑一个。'));
   if (settingsConstraints().length) ui.taskLine.append(document.createTextNode('另附个人设置里的要求。'));
-  const busy = Boolean(state.job);
-  ui.send.disabled = busy || !state.models.length;
+  // 出题时也能接着聊天；只有在等助手回答上一句时不能发
+  ui.send.disabled = !state.models.length || Boolean(state.pending);
   // 要发的内容不再单独占一行，鼠标停在发送按钮上能看到
-  ui.send.title = !state.models.length ? '还没有可用的模型' : busy ? '上一道题还在出' : `出题：${ui.taskLine.textContent.replace(/^将发送：/, '')}`;
+  const typed = ui.prompt.value.trim();
+  ui.send.title = !state.models.length ? '还没有可用的模型'
+    : state.pending ? '上一句还在回答'
+      : state.attachments.length ? '发送：看附件里的内容回答（比如解题），或者把里面的题存进题库'
+        : typed ? '发送：要出题就出题，要组卷就组卷，其他的直接回答'
+        : state.job ? '上一道题还在出' : `按下面的设置出题：${ui.taskLine.textContent.replace(/^将发送：/, '')}`;
 }
 
 // 输入框里的选择只在这次打开期间记住；下次打开按个人设置里的偏好重新预选
@@ -366,30 +427,31 @@ function saveForm() {
   writeStorage(sessionStorage, FORM_KEY, { ...f, topic: f.topic?.id || null, prompt: ui.prompt.value });
 }
 
-// before：改动前的个人设置；给了就只同步真正变了的几项，没给就全部按设置来
+// before：改动前的个人设置；给了就只同步真正变了的几项，没给就全部按设置来。
+// 出题选项不从个人设置预选（默认不选，出题时按个人设置补）；这里只管出题方式、模型和思考强度
 function formFromProfile(before = null) {
   const p = profile();
   const f = state.form;
   const changed = (pick) => !before || pick(p) !== pick(before);
-  if (changed((x) => x.defaults.question_type)) f.qtype = p.defaults.question_type;
-  if (changed((x) => x.defaults.difficulty)) f.difficulty = p.defaults.difficulty;
-  if (changed((x) => x.defaults.purpose)) f.purpose = p.defaults.purpose;
-  if (changed((x) => x.grade)) f.grade = p.grade || '';
   if (changed((x) => x.agent.mode)) f.mode = p.agent.mode;
   if (changed((x) => x.agent.model)) f.model = p.agent.model || null;
-  if (changed((x) => x.agent.thinking)) f.thinking = THINKING[p.agent.thinking] ? p.agent.thinking : 'high';
+  if (changed((x) => x.agent.thinking)) f.thinking = THINKING[p.agent.thinking] ? p.agent.thinking : 'medium';
 }
 
 function restoreForm() {
   formFromProfile();
   const saved = readStorage(sessionStorage, FORM_KEY);
   if (!saved) return;
+  const level = Number(saved.difficulty);
+  const count = Number(saved.count);
   Object.assign(state.form, {
-    qtype: TYPE_LABEL[saved.qtype] ? saved.qtype : state.form.qtype,
-    difficulty: Number(saved.difficulty) || state.form.difficulty,
-    grade: GRADES.includes(saved.grade) || saved.grade === '' ? saved.grade : state.form.grade,
-    purpose: PURPOSES.includes(saved.purpose) ? saved.purpose : state.form.purpose,
+    qtype: TYPE_LABEL[saved.qtype] ? saved.qtype : null,
+    difficulty: level >= 1 && level <= 5 ? level : null,
+    count: count >= 1 && count <= 20 ? count : 1,
+    grade: GRADES.includes(saved.grade) ? saved.grade : null,
+    purpose: PURPOSES.includes(saved.purpose) ? saved.purpose : null,
     mode: MODES[saved.mode] ? saved.mode : state.form.mode,
+    model: saved.model || state.form.model,
     thinking: THINKING[saved.thinking] ? saved.thinking : state.form.thinking,
     topic: saved.topic ? topicFrom(saved.topic) : null,
   });
@@ -451,6 +513,7 @@ function renderPopover() {
   ui.popover.innerHTML = '';
   const builders = {
     kp: finderPopover, type: typePopover, level: levelPopover, count: countPopover, use: usePopover, model: modelPopover,
+    context: contextPopover,
   };
   ui.popover.append(builders[pop.kind]());
 }
@@ -473,15 +536,21 @@ function menuItem({ name, note, checked, onPick, lead, disabled = false }) {
   return item;
 }
 
+// 每个出题选项的菜单最上面都有"不指定"：回到不选的状态，出题时按个人设置里的默认
+function unsetItem(note, checked, onPick) {
+  return menuItem({ name: '不指定', note, checked, onPick: () => { onPick(); afterFormChange(); closePopover(); } });
+}
+
 function typePopover() {
   const wrap = el('div');
   wrap.append(el('p', 'pop-title', '题型'));
+  wrap.append(unsetItem(`按个人设置：${TYPE_LABEL[profile().defaults.question_type] || '单选题'}；也可以在输入框里说`, !state.form.qtype, () => { state.form.qtype = null; }));
   for (const [value, label] of Object.entries(TYPE_LABEL)) {
     wrap.append(menuItem({
       name: label,
       note: TYPE_NOTE[value],
       checked: state.form.qtype === value,
-      onPick: () => { state.form.qtype = value; afterFormChange(); closePopover(); },
+      onPick: () => { state.form.qtype = value; state.touched = true; afterFormChange(); closePopover(); },
     }));
   }
   return wrap;
@@ -490,13 +559,14 @@ function typePopover() {
 function levelPopover() {
   const wrap = el('div');
   wrap.append(el('p', 'pop-title', '难度'));
+  wrap.append(unsetItem(`按个人设置：${DIFFICULTY_LABEL[profile().defaults.difficulty] || '中档'}`, !state.form.difficulty, () => { state.form.difficulty = null; }));
   for (let level = 1; level <= 5; level += 1) {
     wrap.append(menuItem({
       name: `${level} ${DIFFICULTY_LABEL[level]}`,
       note: LEVEL_NOTE[level],
       checked: state.form.difficulty === level,
       lead: dots(level),
-      onPick: () => { state.form.difficulty = level; afterFormChange(); closePopover(); },
+      onPick: () => { state.form.difficulty = level; state.touched = true; afterFormChange(); closePopover(); },
     }));
   }
   return wrap;
@@ -512,34 +582,54 @@ function countPopover() {
       name: `${count} 道`,
       note: COUNT_NOTE[count],
       checked: state.form.count === count,
-      onPick: () => { state.form.count = count; afterFormChange(); closePopover(); },
+      onPick: () => { state.form.count = count; state.touched = true; afterFormChange(); closePopover(); },
     }));
   }
   return wrap;
 }
 
+// 年级和用途：左右两列勾选，和题型、难度的菜单一个样子。"不指定"后面浅色写出按什么来（不指定的年级：
+// 先按考点所在的年级，没选考点按个人设置里的任教年级）。选了一项菜单不关，可以接着选另一列
 function usePopover() {
-  const wrap = el('div', 'pop-section');
-  wrap.style.minWidth = '320px';
-  const auto = state.form.topic?.grade ? `按考点（${state.form.topic.grade}）` : '按考点';
+  const wrap = el('div', 'use-menu');
+  const p = profile();
+  const auto = state.form.topic?.grade || p.grade || '';
+  const column = (title, options, current, pick) => {
+    const col = el('div', 'use-col');
+    col.setAttribute('role', 'group');
+    col.setAttribute('aria-label', title);
+    col.append(el('p', 'pop-title', title));
+    for (const option of options) {
+      const item = menuItem({
+        name: option.label,
+        checked: option.value === current,
+        onPick: () => {
+          pick(option.value);
+          if (option.value) state.touched = true;
+          afterFormChange();
+          renderPopover();
+          ui.popover.querySelector(`[aria-label="${title}"] [aria-checked="true"]`)?.focus({ preventScroll: true });
+        },
+      });
+      if (option.hint) item.querySelector('.name').append(el('small', 'use-default', option.hint));
+      col.append(item);
+    }
+    return col;
+  };
   wrap.append(
-    el('p', 'pop-title', '年级'),
-    segmented([{ value: '', label: auto }, ...GRADES.map((g) => ({ value: g, label: g }))], state.form.grade, (value) => {
-      state.form.grade = value;
-      afterFormChange();
-    }, '年级'),
-    el('p', 'pop-title', '用途'),
-    segmented(PURPOSES.map((p) => ({ value: p, label: p })), state.form.purpose, (value) => {
-      state.form.purpose = value;
-      afterFormChange();
-    }, '用途'),
+    column('年级', [{ value: null, label: '不指定', hint: auto }, ...GRADES.map((g) => ({ value: g, label: g }))],
+      state.form.grade, (value) => { state.form.grade = value; }),
+    column('用途', [{ value: null, label: '不指定', hint: p.defaults.purpose }, ...PURPOSES.map((x) => ({ value: x, label: x }))],
+      state.form.purpose, (value) => { state.form.purpose = value; }),
   );
   return wrap;
 }
 
 // 分档滑块：几档等距排开，可以拖动圆钮、点轨道或下面的字，也能用方向键；
 // 拖动时圆钮跟着手走，松开后吸到最近的一档。min 以下的档选不了：字和圆点变淡，拖过去会停在 min。
+// 拉满到最后一档时加上 is-max：填充变成流动的渐变色，闪着光点（样式在 app.css）。
 // onPick(i) 在档位变了的时候调用（拖动途中也会）
+const SPARKS = 16;
 function levelSlider({ names, index, label, min = 0, onPick }) {
   const last = names.length - 1;
   const clamp = (i) => Math.max(min, Math.min(last, i));
@@ -551,9 +641,17 @@ function levelSlider({ names, index, label, min = 0, onPick }) {
   rail.setAttribute('aria-valuemin', String(min));
   rail.setAttribute('aria-valuemax', String(last));
   const fill = el('span', 'level-fill');
+  // 拉满时在填充里闪的光点：位置、大小、节奏各不相同，平时看不见
+  for (let k = 0; k < SPARKS; k += 1) {
+    const spark = el('span', 'spark');
+    const size = 1.4 + Math.random() * 1.8;
+    spark.style.cssText = `--x:${(k / SPARKS) * 96 + Math.random() * 4}%;--y:${3 + Math.random() * 13}px;`
+      + `--s:${size.toFixed(1)}px;--t:${(1.6 + Math.random() * 1.6).toFixed(2)}s;--d:${(-Math.random() * 3).toFixed(2)}s`;
+    fill.append(spark);
+  }
   const ticks = names.map((_, i) => {
     const tick = el('i', i < min ? 'off' : '');
-    tick.style.left = `${(i / last) * 100}%`;
+    tick.style.setProperty('--p', String(i / last));
     return tick;
   });
   const thumb = el('span', 'level-thumb');
@@ -565,6 +663,7 @@ function levelSlider({ names, index, label, min = 0, onPick }) {
     rail.style.setProperty('--at', String(at));
     ticks.forEach((tick, k) => tick.classList.toggle('on', k / last <= at + 0.001));
     buttons.forEach((button, k) => button.classList.toggle('on', k === i));
+    wrap.classList.toggle('is-max', i === last);
     rail.setAttribute('aria-valuenow', String(i));
     rail.setAttribute('aria-valuetext', names[i]);
   };
@@ -583,7 +682,7 @@ function levelSlider({ names, index, label, min = 0, onPick }) {
     button.type = 'button';
     button.tabIndex = -1;
     button.disabled = i < min;
-    button.style.left = `${(i / last) * 100}%`;
+    button.style.setProperty('--p', String(i / last));
     button.addEventListener('click', () => {
       pick(i);
       rail.focus({ preventScroll: true }); // 点了字以后，方向键接着能调
@@ -592,9 +691,11 @@ function levelSlider({ names, index, label, min = 0, onPick }) {
     return button;
   });
   show(current / last, current);
+  // 圆钮在轨道里移动，两头各留一个圆钮半径
   const ratio = (event) => {
     const box = rail.getBoundingClientRect();
-    return Math.max(min / last, Math.min(1, (event.clientX - box.left) / box.width));
+    const inset = thumb.offsetWidth / 2;
+    return Math.max(min / last, Math.min(1, (event.clientX - box.left - inset) / Math.max(1, box.width - 2 * inset)));
   };
   rail.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
@@ -631,37 +732,37 @@ function levelSlider({ names, index, label, min = 0, onPick }) {
   return wrap;
 }
 
-// 思考强度：低、中、高、极高四档，在模型菜单里用滑块调。4、5 星的题至少用高：低、中选不了，
-// 可以在高和极高之间切换；改回 3 星及以下，又能选低、中
+// 思考强度：低、中、高、极高四档，在模型菜单里用滑块调，随时都能选任意一档，聊天就按它回答。
+// 出 4、5 星的题时至少用高：选低、中也按高出，选极高就用极高（下面有一行提示）
 function thinkingSection() {
   const section = el('div', 'think-section');
   const levels = Object.keys(THINKING);
-  const difficulty = state.form.difficulty;
+  const difficulty = effective().difficulty;
   const hard = difficulty >= FORCE_THINKING_FROM;
-  const current = thinkingFor(difficulty, state.form.thinking);
+  const current = THINKING[state.form.thinking] ? state.form.thinking : 'medium';
   // 各档的说明叠在同一格里、只显示当前这档：换档时菜单高度不变，滑块不会跟着上下跳
   const notes = el('div', 'think-notes');
   const noteNodes = levels.map((level) => notes.appendChild(el('p', '', THINKING[level].note)));
   const showNote = (level) => noteNodes.forEach((node, i) => node.classList.toggle('on', levels[i] === level));
   showNote(current);
+  const hint = el('p', 'pop-hint');
+  const showHint = (level) => {
+    hint.hidden = !(hard && thinkingFor(difficulty, level) !== level);
+    hint.textContent = `聊天按${THINKING[level].name}回答；这次要出的是${DIFFICULTY_LABEL[difficulty]}题（${difficulty} 星），出题时会用高：这类题最容易算错、反复返工。`;
+  };
+  showHint(current);
   const slider = levelSlider({
     names: levels.map((level) => THINKING[level].name),
     index: levels.indexOf(current),
     label: '思考强度',
-    min: hard ? levels.indexOf('high') : 0,
     onPick: (i) => {
       state.form.thinking = levels[i];
       showNote(levels[i]);
+      showHint(levels[i]);
       afterFormChange();
     },
   });
-  section.append(el('p', 'pop-title', '思考强度'), slider, notes);
-  if (hard) {
-    const hint = el('p', 'pop-hint think-lock');
-    hint.innerHTML = svg('lock');
-    hint.append(`难度为${DIFFICULTY_LABEL[difficulty]}（${difficulty} 星）时至少用高，可以选高或极高：这类题最容易算错、反复返工。`);
-    section.append(hint);
-  }
+  section.append(el('p', 'pop-title', '思考强度'), slider, notes, hint);
   return section;
 }
 
@@ -695,6 +796,121 @@ function modelPopover() {
   return wrap;
 }
 
+// ---------- 上下文：这个对话带给模型的前文有多长，可以压缩成摘要 ----------
+
+// 输入框右下角的小圆环：前文占预算的几成；对话还没有内容时不显示
+function renderContext() {
+  const chip = ui.chips.context;
+  const stats = state.context;
+  const show = state.mode === 'chat' && Boolean(state.chat) && Boolean(stats) && stats.turns + stats.summarized > 0;
+  chip.hidden = !show;
+  if (!show) return;
+  const ratio = Math.min(1, stats.tokens / Math.max(1, stats.limit));
+  const percent = Math.round(ratio * 100);
+  const round = 2 * Math.PI * 6;
+  chip.innerHTML = `<svg class="ctx-ring" viewBox="0 0 16 16" aria-hidden="true"><circle class="track" cx="8" cy="8" r="6"/>`
+    + `<circle class="used" cx="8" cy="8" r="6" stroke-dasharray="${(round * Math.max(ratio, 0.02)).toFixed(2)} ${round.toFixed(2)}"/></svg>`;
+  chip.append(el('span', '', `${percent}%`));
+  chip.classList.toggle('full', ratio >= stats.auto);
+  chip.title = `上下文：约 ${kilo(stats.tokens)} / ${kilo(stats.limit)} Token（${percent}%）。点开可以压缩`;
+  chip.setAttribute('aria-label', `上下文用了 ${percent}%`);
+}
+
+function setContext(stats, chatId) {
+  if (stats && state.chat?.id === chatId) state.context = stats;
+  renderContext();
+  // 上下文超额了：马上在后台压缩，不等下一句
+  if (stats?.needs && state.chat?.id === chatId) setTimeout(() => autoCompress(chatId), 300);
+}
+
+// 自动压缩：只在超额时压（服务端再确认一次）；压完对话里排进"已压缩"的分界线
+let autoCompressing = null;
+async function autoCompress(chatId) {
+  if (!chatId || autoCompressing === chatId || state.pending?.chat === chatId || !state.models.length) return;
+  autoCompressing = chatId;
+  try {
+    const data = await request(`/api/sessions/${encodeURIComponent(chatId)}/compress`, {
+      method: 'POST',
+      body: JSON.stringify({ model: mainModel()?.id || null, auto: true }),
+    });
+    if (!data.summary) {
+      setContext(data.context, chatId);
+      return;
+    }
+    // 这个对话里正在出题时不重排（重新打开会打断进度的显示），只更新用量；下次打开就能看到分界线
+    if (state.chat?.id === chatId && state.job?.chat !== chatId && !state.pending) await openChat(chatId, { quiet: true });
+    else if (state.chat?.id === chatId) state.context = data.context;
+    renderContext();
+    toast(`上下文超额，已自动把前面 ${data.summary.covers_count} 轮压缩成摘要`);
+  } catch {
+    // 没压缩成：发下一句之前服务端还会再试
+  } finally {
+    autoCompressing = null;
+  }
+}
+
+async function loadContext(chatId = state.chat?.id) {
+  if (!chatId) {
+    state.context = null;
+    renderContext();
+    return;
+  }
+  try {
+    setContext(await request(`/api/sessions/${encodeURIComponent(chatId)}/context`), chatId);
+  } catch {
+    // 读不到就先不显示
+  }
+}
+
+function contextPopover() {
+  const stats = state.context || { tokens: 0, limit: 24000, auto: 0.85, keep: 4, turns: 0, summarized: 0, dropped: 0, compressible: false };
+  const percent = Math.round(Math.min(1, stats.tokens / Math.max(1, stats.limit)) * 100);
+  const wrap = el('div', 'ctx-menu');
+  const bar = el('div', 'ctx-bar');
+  const fill = el('i');
+  fill.style.width = `${Math.max(percent, 1)}%`;
+  bar.append(fill);
+  const parts = [`带上了最近 ${stats.turns} 轮的原文`];
+  if (stats.summarized) parts.push(`更早的 ${stats.summarized} 轮用摘要代替`);
+  if (stats.dropped) parts.push(`还有 ${stats.dropped} 轮放不下、没带上`);
+  wrap.append(
+    el('p', 'pop-title', '上下文'),
+    el('p', 'ctx-numbers', `约 ${kilo(stats.tokens)} / ${kilo(stats.limit)} Token · ${percent}%`),
+    bar,
+    el('p', 'ctx-note', `${parts.join('，')}。助手回答问题、判断要不要出题、定组卷方案时都会带上这些前文；出题时，它会把前文里相关的要求一起写给命题员。`),
+    el('p', 'ctx-note', `为了速度和花费，前文最多带约 ${kilo(stats.limit)} Token。超过 ${Math.round(stats.auto * 100)}% 时，发下一句之前会自动把前面的内容压缩成摘要，最近 ${stats.keep} 轮保留原文。`),
+  );
+  const foot = el('div', 'pop-foot');
+  const compress = el('button', 'btn', '压缩上下文');
+  compress.type = 'button';
+  compress.disabled = !stats.compressible || !state.models.length;
+  compress.addEventListener('click', () => compressContext(compress));
+  foot.append(el('span', '', stats.compressible ? `把最近 ${stats.keep} 轮以前的内容写成一段摘要` : '对话还很短，不用压缩'), compress);
+  wrap.append(el('div', 'pop-sep'), foot);
+  return wrap;
+}
+
+async function compressContext(button) {
+  const chatId = state.chat?.id;
+  if (!chatId) return;
+  button.disabled = true;
+  button.textContent = '正在压缩…';
+  try {
+    const data = await request(`/api/sessions/${encodeURIComponent(chatId)}/compress`, {
+      method: 'POST',
+      body: JSON.stringify({ model: mainModel()?.id || null }),
+    });
+    closePopover();
+    // 重新打开这个对话：分界线排在压缩和没压缩的内容之间
+    if (state.chat?.id === chatId) await openChat(chatId, { quiet: true });
+    toast(`已压缩：前面 ${data.summary.covers_count} 轮写成了一段摘要，约 ${kilo(data.summary.tokens_after)} Token`);
+  } catch (error) {
+    toast(`没压缩成：${error.message}`);
+    button.disabled = false;
+    button.textContent = '压缩上下文';
+  }
+}
+
 function finderPopover() {
   const wrap = el('div', 'finder');
   const search = el('input', 'finder-search');
@@ -709,7 +925,7 @@ function finderPopover() {
   foot.append(el('span', '', state.form.topic ? `当前：${state.form.topic.label}` : '不选也可以：会在这个年级的范围里挑一个考点'));
   const clear = el('button', 'link-btn', '不限考点');
   clear.type = 'button';
-  clear.addEventListener('click', () => { state.form.topic = null; afterFormChange(); closePopover(); });
+  clear.addEventListener('click', () => { state.form.topic = null; state.touched = true; afterFormChange(); closePopover(); });
   foot.append(clear);
   wrap.append(foot);
 
@@ -717,6 +933,7 @@ function finderPopover() {
     state.form.topic = topicFrom(id);
     state.blueprint = null;
     state.finder.query = '';
+    state.touched = true;
     afterFormChange();
     closePopover();
   };
@@ -828,6 +1045,7 @@ function applyBlueprint(spec) {
     .filter((item) => item.key.length >= 2 && topicKey.includes(item.key))
     .sort((a, b) => b.key.length - a.key.length)[0];
   state.form.topic = match ? topicFrom(match.kp.id) : null;
+  state.touched = true;
   ui.prompt.value = `题目内容：${spec.topic}`;
   autosize();
   $('#blueprintDialog').close();
@@ -872,20 +1090,24 @@ function setMode(mode) {
   ui.dock.hidden = !(idle || chat);
   (idle ? ui.heroSlot : ui.dock).append(ui.composer);
   ui.prompt.placeholder = chat ? PLACEHOLDER.chat : PLACEHOLDER.idle;
-  // 题库和试卷自己决定右栏放什么；对话里右栏放题目
+  // 题库和试卷自己决定右栏放什么；对话里右栏放题目（或组好的试卷），只有聊天的对话不开右栏
   if (chat) {
-    panel.open();
     ui.sheetHeading.textContent = '题目';
     ui.panelActions.replaceChildren();
     ui.sheetScroll.classList.remove('framed');
+    delete ui.sheetPanel.dataset.view;
     if (state.focus) {
+      panel.open();
       state.focus.sheetKey = '';
       renderSheet(state.focus, { animate: false });
+    } else {
+      panel.close();
     }
   } else if (mode !== 'bank' && mode !== 'papers') {
     panel.close();
   }
   closeRail();
+  renderContext();
   $('#experimentLink').setAttribute('aria-current', mode === 'experiment' ? 'page' : 'false');
   $('#bankLink').setAttribute('aria-current', mode === 'bank' ? 'page' : 'false');
   $('#papersLink').setAttribute('aria-current', mode === 'papers' ? 'page' : 'false');
@@ -960,11 +1182,164 @@ const batchActions = {
 };
 
 function addBatchTurn() {
-  const turn = new BatchTurn(batchActions);
+  return appendTurn(new BatchTurn(batchActions));
+}
+
+function appendTurn(turn) {
   state.chat.turns.push(turn);
   ui.conversation.append(turn.root);
   ui.conversation.classList.toggle('multi', state.chat.turns.length > 1);
   return turn;
+}
+
+function removeTurn(turn) {
+  turn.root.remove();
+  if (state.chat) state.chat.turns = state.chat.turns.filter((other) => other !== turn);
+  ui.conversation.classList.toggle('multi', (state.chat?.turns.length || 0) > 1);
+}
+
+// 聊天那一轮没回答成时：再问一次，或者把这句话直接当出题要求
+const chatActions = {
+  retry: (turn) => converse(turn.text, turn),
+  asQuestion: (turn) => {
+    removeTurn(turn);
+    startGeneration({ note: turn.text });
+  },
+};
+
+// 自动组卷那一轮的按钮
+const paperActions = {
+  stop: (turn) => stopJob(turn),
+  showSlot: (turn, no) => showSlot(turn, no),
+  showPaper: (turn) => focusTurn(turn, true),
+  exportPaper: (turn, format, trigger) => turn.paper
+    && downloadPaper(turn.paper.id, { format, answers: true, title: turn.paper.title, trigger }),
+  openPaper: async (turn) => {
+    if (!turn.paper) return;
+    setMode('papers');
+    await papers.show(turn.paper.id);
+  },
+  again: (turn) => startAssembly(turn.snapshot?.text || ''),
+};
+
+// 右栏显示试卷里的第 no 题：挑好、出好的按题库里的题显示，正在现场出的读那道题的实时进度
+class SlotSource {
+  constructor(paperTurn, no) {
+    this.paperTurn = paperTurn;
+    this.no = no;
+    this.snapshot = null;
+    this.sheetKey = '';
+    this.focusLane = null;
+    this.fromBank = false;
+    this.resultNote = '';
+  }
+
+  get sheetPrefix() {
+    return `第 ${this.no} 题，`;
+  }
+
+  shownLane() {
+    return shownLane(this.snapshot, this.focusLane);
+  }
+}
+
+// 题库里的一道题 → 右栏题目卡片要的快照形状
+function bankSnapshot(item) {
+  return {
+    id: `bank-${item.id}`,
+    status: 'succeeded',
+    brief: { target_difficulty: item.difficulty, grade: item.grade || '' },
+    meta: { knowledge_label: item.knowledge },
+    config: {},
+    elapsed: 0,
+    lanes: [{ id: 'A', status: 'won', note: '', previews: [], calls: 0, tokens: 0 }],
+    winner: 'A',
+    events: [],
+    calls: [],
+    totals: { calls: 0, input_tokens: 0, output_tokens: 0 },
+    result: asDraft(item),
+    error: null,
+  };
+}
+
+async function showSlot(turn, no, reveal = true) {
+  const slot = turn.slots().find((one) => one.no === no);
+  if (!slot) return;
+  const source = new SlotSource(turn, no);
+  try {
+    if (slot.bank_id) {
+      source.snapshot = bankSnapshot(await request(`/api/bank/${slot.bank_id}`));
+      source.fromBank = true;
+      source.resultNote = slot.source === 'generated' ? '现场出的，已通过全部检查' : '从题库里选的';
+    } else if (slot.job_id) {
+      source.snapshot = await request(`/api/jobs/${slot.job_id}`);
+    }
+  } catch (error) {
+    toast(error.message);
+    return;
+  }
+  focusTurn(source, reveal);
+}
+
+// 正在组卷：右栏显示的那一道还在现场出，就跟着刷新；出好了换成题库里的那一道
+async function refreshSlot(turn) {
+  const source = state.focus;
+  if (!source || source.paperTurn !== turn) return;
+  const slot = turn.slots().find((one) => one.no === source.no);
+  if (!slot) return;
+  if (slot.bank_id && !source.fromBank) {
+    showSlot(turn, slot.no, false);
+    return;
+  }
+  if (slot.state !== 'generating' || !slot.job_id) return;
+  try {
+    const snap = await request(`/api/jobs/${slot.job_id}`);
+    if (state.focus !== source) return;
+    const before = source.snapshot?.status;
+    source.snapshot = snap;
+    renderSheet(source, { animate: before !== snap.status });
+  } catch {
+    // 下一轮再试
+  }
+}
+
+const scoreText = (value) => (Number.isInteger(Number(value)) ? String(Number(value)) : String(Number(Number(value).toFixed(1))));
+
+// 右栏显示组好的整份试卷（和"试卷"页的预览一样，由后端的打印页生成），上面带导出按钮
+function renderPaperSheet(turn) {
+  const snap = turn.snapshot;
+  const paper = turn.paper;
+  ui.sheetPanel.dataset.view = 'paper';
+  ui.sheetHeading.textContent = '试卷';
+  ui.sheetTabs.innerHTML = '';
+  ui.copy.hidden = true;
+  if (!paper) {
+    ui.sheetNote.textContent = turn.running ? '正在组卷' : '没组成';
+    ui.panelActions.replaceChildren();
+    const key = `${snap?.id}:${snap?.status}:none`;
+    if (turn.sheetKey === key) return;
+    turn.sheetKey = key;
+    ui.sheetScroll.classList.remove('framed');
+    ui.sheetScroll.replaceChildren(turn.running
+      ? sheetMessage('正在组卷', ['题目都挑好、出好以后，整份试卷会显示在这里。', '点左边列表里的一道题，可以先看那道题。'], true)
+      : sheetMessage('没能组成试卷', [legacyText(snap?.error) || '']));
+    return;
+  }
+  ui.sheetNote.textContent = `${paper.count} 道题，满分 ${scoreText(paper.total)} 分`;
+  const key = `${snap.id}:paper:${paper.id}:${isDark()}`; // 换了主题要重新载入预览
+  if (turn.sheetKey === key) return;
+  turn.sheetKey = key;
+  const exportButton = (format, label) => {
+    const node = el('button', 'ghost-btn', label);
+    node.type = 'button';
+    node.addEventListener('click', () => downloadPaper(paper.id, { format, answers: true, title: paper.title, trigger: node }));
+    return node;
+  };
+  ui.panelActions.replaceChildren(exportButton('docx', '导出 Word'), exportButton('pdf', '导出 PDF'));
+  const frame = el('iframe', 'paper-frame');
+  frame.title = '试卷预览';
+  frame.src = `/api/papers/${paper.id}/print?answers=true&dark=${isDark()}&v=${Date.now()}`;
+  panel.frame(frame);
 }
 
 // 右栏显示批量里的第 index 道：出完的按出题记录，还在出的读这道题的实时进度
@@ -1015,7 +1390,7 @@ function batchAgain(turn) {
   const stems = turn.items().map((item) => oneLine(item.stem).slice(0, 100)).filter(Boolean).slice(-8);
   const extra = stems.length ? `再出一批新题，不要和下面这些已经出过的题重复：\n${stems.map((s) => `- ${s}`).join('\n')}` : '';
   afterFormChange();
-  submit({ extra, followUp: `再出 ${turn.count} 道` });
+  startGeneration({ extra, followUp: `再出 ${turn.count} 道` });
 }
 
 // 把这一批出好的题组成一份试卷
@@ -1041,19 +1416,41 @@ function newChatId() {
 
 function resetChat(id) {
   stopReplay();
+  const same = state.chat?.id === id;
   state.chat = id ? { id, turns: [] } : null;
   state.focus = null;
+  if (!same) state.context = null; // 换了对话：上下文用量等读回来再显示
   ui.conversation.replaceChildren();
   ui.conversation.classList.remove('multi');
   writeStorage(sessionStorage, CHAT_KEY, id || null);
+  renderContext();
 }
 
 function addTurn() {
-  const turn = new Turn(turnActions);
-  state.chat.turns.push(turn);
-  ui.conversation.append(turn.root);
-  ui.conversation.classList.toggle('multi', state.chat.turns.length > 1);
-  return turn;
+  return appendTurn(new Turn(turnActions));
+}
+
+function addChatTurn(text, attachments = []) {
+  return appendTurn(new ChatTurn(chatActions, text, attachments));
+}
+
+// 把附件里的题存进题库的那一轮（核对卡片）
+const importActions = {
+  stop: (turn) => stopJob(turn),
+  openBank: () => openBank(),
+  saved: (turn, data) => {
+    setCounts(data.counts);
+    loadSessions();
+    loadContext(state.chat?.id);
+  },
+};
+
+function addImportTurn() {
+  return appendTurn(new ImportTurn(importActions));
+}
+
+function addPaperTurn() {
+  return appendTurn(new PaperTurn(paperActions));
 }
 
 function liveTurn() {
@@ -1066,7 +1463,8 @@ function renderTurn(turn, { animate = true, replaying = false } = {}) {
   if (state.focus === turn) renderSheet(turn, { animate });
 }
 
-// 右栏显示哪一道：默认跟着最新的一道；点某一轮的"看题目"就换成那一道
+// 右栏显示哪一道：默认跟着最新的一道；点某一轮的"看题目"就换成那一道。
+// 组卷那一轮显示整份试卷；点它列表里的一道题，显示那一道。聊天没有要放在右栏的东西
 function focusTurn(turn, reveal = false) {
   // 批量那一轮本身不能直接显示：显示它出好的第一道（还没有就第一道）
   if (turn.isBatch) {
@@ -1074,14 +1472,18 @@ function focusTurn(turn, reveal = false) {
     if (first) showBatchItem(turn, first.index, reveal);
     return;
   }
+  if (turn.isChat || turn.isSummary || turn.isImport) return;
   state.focus = turn;
-  const owner = turn.batchTurn || turn;
+  const owner = turn.batchTurn || turn.paperTurn || turn;
+  if (turn.paperTurn) turn.paperTurn.focusedNo = turn.no;
+  else if (turn.isPaper) turn.focusedNo = null;
   for (const other of state.chat?.turns || []) other.setFocused(other === owner);
   if (turn.batchTurn) turn.batchTurn.setFocusedItem(turn.index);
+  if (turn.paperTurn) turn.paperTurn.setFocusedSlot(turn.no);
   turn.sheetKey = '';
   if (state.mode !== 'chat') return;
+  panel.open(reveal);
   renderSheet(turn, { animate: false });
-  if (reveal) panel.open(true);
 }
 
 function scrollToBottom() {
@@ -1113,8 +1515,20 @@ function sheetMessage(title, lines, busy = false) {
 
 function renderSheet(turn, { animate = true } = {}) {
   if (!turn || state.mode !== 'chat' || state.focus !== turn) return;
+  if (turn.isPaper) {
+    renderPaperSheet(turn);
+    return;
+  }
+  // 刚才右栏放的是整份试卷：换回题目的样子
+  if (ui.sheetPanel.dataset.view === 'paper') {
+    delete ui.sheetPanel.dataset.view;
+    ui.sheetHeading.textContent = '题目';
+    ui.panelActions.replaceChildren();
+    ui.sheetScroll.classList.remove('framed');
+  }
   const snap = turn.snapshot;
-  const turns = state.chat?.turns || [];
+  // 第几道：只数出题的那几轮，聊天、组卷和压缩的分界线不算
+  const turns = (state.chat?.turns || []).filter((other) => !other.isChat && !other.isPaper && !other.isSummary && !other.isImport);
   const prefix = turn.sheetPrefix ?? (turns.length > 1 ? `第 ${turns.indexOf(turn) + 1} 道，` : '');
   const waiting = () => sheetMessage('正在构思题干', ['题干通过审题后会先显示在这里；答案和解析要等解题员写完、复核员核对后再补上。'], true);
   if (!snap) {
@@ -1137,7 +1551,7 @@ function renderSheet(turn, { animate = true } = {}) {
   let note = '';
   if (showResult) {
     key = `${snap.id}:result`;
-    note = several ? `方案 ${snap.winner}，已通过全部检查` : '已通过全部检查';
+    note = turn.resultNote || (several ? `方案 ${snap.winner}，已通过全部检查` : '已通过全部检查');
     build = () => {
       const reveal = animate && !state.revealed.has(snap.id);
       state.revealed.add(snap.id);
@@ -1173,16 +1587,329 @@ function renderSheet(turn, { animate = true } = {}) {
   ui.sheetScroll.scrollTop = 0;
 }
 
+// ---------- 附件：粘贴截图、拖进输入框，或者点回形针选图片、PDF、文本文件 ----------
+
+const ATTACH_MAX = 10;
+const ATTACH_BYTES = 25 * 1024 * 1024;
+let attachSeq = 0;
+
+function fileKind(file) {
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) return 'pdf';
+  if (/^image\/(png|jpeg|webp|gif|bmp)$/.test(file.type)) return 'image';
+  if (file.type.startsWith('text/') || /\.(txt|md|markdown)$/i.test(file.name)) return 'text';
+  return '';
+}
+
+function readDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('文件没读出来'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// 图片的小缩略图（最长边 160 像素）：显示在输入框上方，也存进聊天记录
+function thumbnail(dataUrl) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      const scale = Math.min(1, 160 / Math.max(image.naturalWidth, image.naturalHeight, 1));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+      const webp = canvas.toDataURL('image/webp', 0.8);
+      resolve(webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/jpeg', 0.8));
+    };
+    image.onerror = () => resolve('');
+    image.src = dataUrl;
+  });
+}
+
+function addFiles(list) {
+  for (const file of [...list]) {
+    if (state.attachments.length >= ATTACH_MAX) {
+      toast(`一次最多带 ${ATTACH_MAX} 个附件`);
+      break;
+    }
+    const kind = fileKind(file);
+    if (!kind) {
+      toast(`${file.name} 的格式不支持：可以传图片（PNG、JPG、WebP）、PDF 或文本文件`);
+      continue;
+    }
+    if (file.size > ATTACH_BYTES) {
+      toast(`${file.name} 太大了：一个文件最多 25 MB`);
+      continue;
+    }
+    attachSeq += 1;
+    const item = { key: `a${attachSeq}`, name: file.name || `截图${attachSeq}.png`, kind, size: file.size, status: 'uploading', id: null, thumb: '', pages: 1 };
+    state.attachments.push(item);
+    uploadAttachment(item, file);
+  }
+  renderAttachments();
+}
+
+async function uploadAttachment(item, file) {
+  try {
+    const data = await readDataUrl(file);
+    if (item.kind === 'image') item.thumb = await thumbnail(data);
+    renderAttachments();
+    const saved = await request('/api/uploads', { method: 'POST', body: JSON.stringify({ name: item.name, data, thumb: item.thumb }) });
+    Object.assign(item, { id: saved.id, pages: saved.pages, status: 'ready' });
+  } catch (error) {
+    Object.assign(item, { status: 'error', error: error.message });
+    toast(`${item.name} 没传上去：${error.message}`);
+  }
+  renderAttachments();
+}
+
+// 输入框上方的附件条：缩略图或文件图标、名字，右上角的 × 拿掉
+function renderAttachments() {
+  const tray = ui.attachTray;
+  tray.hidden = !state.attachments.length;
+  tray.replaceChildren(...state.attachments.map((item) => {
+    const card = el('span', `attach-card ${item.kind} ${item.status}`);
+    card.title = item.status === 'error' ? `${item.name}：${item.error}` : item.name;
+    if (item.thumb) {
+      const img = el('img');
+      img.src = item.thumb;
+      img.alt = item.name;
+      card.append(img);
+    } else {
+      card.insertAdjacentHTML('afterbegin', svg('file'));
+    }
+    if (item.kind !== 'image' || item.status !== 'ready') {
+      const words = el('span', 'attach-words');
+      const note = item.status === 'uploading' ? '正在上传…' : item.status === 'error' ? '没传上去'
+        : item.kind === 'pdf' ? `PDF，${item.pages} 页` : item.kind === 'text' ? '文本' : '';
+      words.append(el('span', 'attach-name', item.name), el('small', '', note));
+      card.append(words);
+    }
+    const remove = el('button', 'attach-remove');
+    remove.type = 'button';
+    remove.title = `拿掉 ${item.name}`;
+    remove.setAttribute('aria-label', `拿掉 ${item.name}`);
+    remove.textContent = '×';
+    remove.addEventListener('click', () => {
+      state.attachments = state.attachments.filter((other) => other !== item);
+      renderAttachments();
+      ui.prompt.focus();
+    });
+    card.append(remove);
+    return card;
+  }));
+  refreshComposer();
+}
+
+// ---------- 发送：聊天、出题、组卷，还是把附件里的题存进题库 ----------
+
+// 输入框空着、也没有附件就按下面的设置出题；写了字或者带了附件就先问助手想做什么
+function submit() {
+  const text = ui.prompt.value.trim();
+  if (state.attachments.some((item) => item.status === 'uploading')) {
+    toast('附件还在上传，稍等一下再发');
+    return;
+  }
+  const files = state.attachments.filter((item) => item.status === 'ready');
+  if (!text && !files.length) {
+    startGeneration();
+    return;
+  }
+  converse(text, null, files);
+}
+
+// 发出去的话没能变成出题、组卷（比如上一道还在出）：输入框空着就把这句话放回去，免得白写
+function restorePrompt(text) {
+  if (!text || ui.prompt.value.trim()) return;
+  ui.prompt.value = text;
+  autosize();
+  saveForm();
+  refreshComposer();
+}
+
+// 助手提取到的出题设置（题型、难度、几道、年级、知识点、用途）填到输入框下方的选项里
+function applyGenerate(settings) {
+  const f = state.form;
+  if (TYPE_LABEL[settings.question_type]) f.qtype = settings.question_type;
+  if (settings.difficulty >= 1 && settings.difficulty <= 5) f.difficulty = settings.difficulty;
+  if (settings.count >= 1 && settings.count <= 20) f.count = settings.count;
+  if (GRADES.includes(settings.grade)) f.grade = settings.grade;
+  if (PURPOSES.includes(settings.purpose)) f.purpose = settings.purpose;
+  // 说了知识点：在目录里找对应的考点（找不到就不限考点，由出题的模型按原话去对）
+  if (settings.topic) f.topic = matchTopic(settings.topic);
+  state.blueprint = null;
+  afterFormChange();
+}
+
+// 助手说的知识点 → 目录里的考点：名字一样的；话里包含了某个考点名的（取最长的）；某一节；
+// 只是"导数"这样的大范围、对得上好几个考点的，不硬选
+function matchTopic(text) {
+  const key = normalize(text);
+  if (!key) return null;
+  for (const [id, entry] of state.nodes) {
+    if (entry.path.length >= 3 && normalize(entry.node.name) === key) return topicFrom(id);
+  }
+  const inside = state.kpList.filter((item) => item.key.length >= 2 && key.includes(item.key)).sort((a, b) => b.key.length - a.key.length)[0];
+  if (inside) return topicFrom(inside.kp.id);
+  const sections = [...state.nodes.entries()]
+    .filter(([, entry]) => entry.path.length === 3 && normalize(entry.node.name).length >= 2 && key.includes(normalize(entry.node.name)))
+    .sort(([, a], [, b]) => normalize(b.node.name).length - normalize(a.node.name).length);
+  if (sections.length) return topicFrom(sections[0][0]);
+  const around = state.kpList.filter((item) => key.length >= 2 && item.key.includes(key));
+  return around.length === 1 ? topicFrom(around[0].kp.id) : null;
+}
+
+// 问助手：先在对话里显示这句话（和附件）和"正在想"，回答回来以后，聊天就显示回答；
+// 出题、组卷、存题就换成出题（组卷、核对题目）的那一轮。files：带着的附件（重试时用那一轮原来的附件）
+async function converse(text, retryTurn = null, files = null) {
+  const attachments = files || retryTurn?.attachments || [];
+  if (state.pending) {
+    toast('上一句还在回答，等它答完再发');
+    return;
+  }
+  const chatId = retryTurn && state.chat ? state.chat.id : state.mode === 'chat' && state.chat ? state.chat.id : newChatId();
+  if (!state.chat || state.chat.id !== chatId) resetChat(chatId);
+  writeStorage(sessionStorage, CHAT_KEY, chatId);
+  const turn = retryTurn || addChatTurn(text, attachments);
+  // 前文快满了：这一句发出去之前会先压缩，等得久一点，先说一声
+  const ctx = state.context;
+  turn.wait(ctx && ctx.compressible && ctx.tokens > ctx.limit * ctx.auto ? '前文太长，先压缩成摘要' : '正在想');
+  if (!retryTurn) {
+    ui.prompt.value = '';
+    autosize();
+    saveForm();
+    // 带着的附件随这句话发出去，输入框上方的附件条清空
+    state.attachments = state.attachments.filter((item) => !attachments.includes(item));
+    renderAttachments();
+  }
+  state.pending = { turn, chat: chatId, text: text || attachments.map((item) => item.name).join('、') };
+  setMode('chat');
+  scrollToBottom();
+  refreshComposer();
+  const f = state.form;
+  let answer;
+  try {
+    answer = await request('/api/assistant', {
+      method: 'POST',
+      body: JSON.stringify({
+        text,
+        attachments: attachments.map((item) => item.id),
+        language: language(), // 界面是英文时，回答也用英文
+        session_id: chatId,
+        model: mainModel()?.id || null,
+        // 按输入框右下角你选的那一档回答（出题选项里的难度不影响聊天）
+        thinking: THINKING[f.thinking] ? f.thinking : 'medium',
+        touched: state.touched,
+        // 出题选项：选了的按选的，没选的是个人设置里的默认（"难一点"这类说法按它算）
+        current: (() => {
+          const eff = effective();
+          return {
+            question_type: eff.qtype,
+            difficulty: eff.difficulty,
+            count: eff.count,
+            grade: eff.grade || '',
+            topic: f.topic?.name || '',
+            purpose: eff.purpose,
+          };
+        })(),
+      }),
+    });
+  } catch (error) {
+    state.pending = null;
+    turn.fail(error.message);
+    refreshComposer();
+    return;
+  }
+  state.pending = null;
+  refreshComposer();
+  setContext(answer.context, chatId);
+  if (answer.intent === 'chat') {
+    turn.show(answer.message);
+    if (state.chat?.id === chatId) scrollToBottom();
+    loadSessions();
+  } else {
+    removeTurn(turn);
+    if (answer.intent === 'paper') await startAssembly(text, chatId);
+    else if (answer.intent === 'import') await startChatImport(text, attachments, chatId);
+    else {
+      const settings = answer.generate || {};
+      applyGenerate(settings);
+      // 交给命题员的是助手连同前文整理成的要求；任务卡片上同时显示你的原话
+      await startGeneration({ note: settings.requirement || text, said: text, chatId });
+    }
+  }
+  // 发这一句之前自动压缩过前文：重新打开对话，把"已压缩"的分界线排进去
+  if (answer.compressed && state.chat?.id === chatId) {
+    await openChat(chatId, { quiet: true });
+    toast(`前文太长，已把前面 ${answer.compressed.covers_count} 轮压缩成摘要`);
+  }
+}
+
+// 把附件里的题存进题库：识别题目，没有解析的补写解析，做成核对卡片，确认后才存（见后端 importer.py）
+async function startChatImport(text, files, chatId) {
+  if (state.job) {
+    toast('上一道题还在出，等它出完（或先停止）再存题');
+    return;
+  }
+  try {
+    const snap = await request('/api/chat-imports', {
+      method: 'POST',
+      body: JSON.stringify({
+        session_id: chatId,
+        uploads: files.map((item) => item.id),
+        text,
+        model: mainModel()?.id || null,
+        thinking: THINKING[state.form.thinking] ? state.form.thinking : 'medium',
+        edition: profile().textbook || 'pep_a',
+      }),
+    });
+    startLive(snap.id, snap.session_id || chatId, { import: true, snapshot: snap });
+  } catch (error) {
+    toast(`没能开始识别：${error.message}`);
+  }
+}
+
+// 自动组卷：按这句话定方案、从题库挑题，不够的现场出题（见后端 assemble.py）
+async function startAssembly(text, chatId = null) {
+  if (!text) return;
+  if (state.job) {
+    toast('上一道题还在出，等它出完（或先停止）再组卷');
+    restorePrompt(text);
+    return;
+  }
+  const p = profile();
+  const id = chatId || (state.mode === 'chat' && state.chat ? state.chat.id : newChatId());
+  const config = {
+    ...agentConfig(state.form.mode, { ...p.agent, model: mainModel()?.id }, state.models, state.defaultModel),
+    thinking: THINKING[state.form.thinking] ? state.form.thinking : 'medium',
+  };
+  try {
+    const snap = await request('/api/assemblies', {
+      method: 'POST',
+      body: JSON.stringify({ text, session_id: id, config, meta: { edition: p.textbook || 'pep_a', detail: p.defaults.solution_detail } }),
+    });
+    state.touched = false;
+    startLive(snap.id, snap.session_id || id, { paper: true, snapshot: snap });
+  } catch (error) {
+    toast(`没能开始组卷：${error.message}`);
+    restorePrompt(text);
+  }
+}
+
 // ---------- 出题 ----------
 
-// 在对话里发出的要求接在这个对话后面；在起始页发出的开一个新对话
-async function submit(options = {}) {
+// 在对话里发出的要求接在这个对话后面；在起始页发出的开一个新对话。
+// note：助手判断是出题的那句话（输入框已经清空）；chatId：那句话所在的对话
+async function startGeneration(options = {}) {
+  const given = options.note !== undefined;
   if (state.job) {
     toast('上一道题还在出，等它结束或先停止');
+    if (given) restorePrompt(options.said || options.note);
     return;
   }
   const payload = composeRequest(options);
-  const chatId = state.mode === 'chat' && state.chat ? state.chat.id : newChatId();
+  const chatId = options.chatId || (state.mode === 'chat' && state.chat ? state.chat.id : newChatId());
   payload.meta.session_id = chatId;
   const count = state.form.count || 1;
   saveForm();
@@ -1193,12 +1920,19 @@ async function submit(options = {}) {
       ? await request('/api/batches', { method: 'POST', body: JSON.stringify({ ...body, count }) })
       : await request('/api/jobs', { method: 'POST', body: JSON.stringify(body) });
     // 像聊天一样，发出去以后输入框清空；题型、难度这些选择留着，接着出下一道
-    ui.prompt.value = '';
-    autosize();
-    saveForm();
+    if (!given) {
+      ui.prompt.value = '';
+      autosize();
+      saveForm();
+    }
+    state.touched = false;
     startLive(job.id, job.session_id || chatId, count > 1 ? { count, request: body } : null);
+    // 记下发出时的出题选项：题出完以后，没再动过就恢复成不选
+    state.job.chips = chipState();
+    writeStorage(sessionStorage, JOB_KEY, state.job);
   } catch (error) {
     toast(`没能开始：${error.message}`);
+    if (given) restorePrompt(options.said || options.note);
     refreshComposer();
   }
 }
@@ -1224,11 +1958,11 @@ function followUp(turn, kind) {
     label = '再出一道同类题';
     extra = stem ? `出一道新题，题目和情境都不要和上一道重复。${previous}` : '';
   } else if (kind === 'harder') {
-    state.form.difficulty = Math.min(5, state.form.difficulty + 1);
+    state.form.difficulty = Math.min(5, effective().difficulty + 1);
     label = '难一点';
     extra = stem ? `比上一道题难一档，换一道新题。${previous}` : '';
   } else if (kind === 'easier') {
-    state.form.difficulty = Math.max(1, state.form.difficulty - 1);
+    state.form.difficulty = Math.max(1, effective().difficulty - 1);
     label = stem ? '简单一点' : '简单一点再试';
     extra = stem ? `比上一道题简单一档，换一道新题。${previous}` : '';
   } else if (kind === 'context') {
@@ -1236,7 +1970,7 @@ function followUp(turn, kind) {
     extra = `考查内容和难度不变，换一个和上一道不同的情境。${previous}`;
   }
   afterFormChange();
-  submit({ extra, followUp: label });
+  startGeneration({ extra, followUp: label });
 }
 
 function loadBrief(brief, meta, config) {
@@ -1244,7 +1978,7 @@ function loadBrief(brief, meta, config) {
   if (TYPE_LABEL[brief.question_type]) f.qtype = brief.question_type;
   if (brief.target_difficulty) f.difficulty = brief.target_difficulty;
   if (PURPOSES.includes(brief.teaching_purpose)) f.purpose = brief.teaching_purpose;
-  f.grade = GRADES.includes(brief.grade) ? brief.grade : '';
+  f.grade = GRADES.includes(brief.grade) ? brief.grade : null;
   const topicId = meta.topic_id || brief.curriculum_node_id;
   f.topic = (topicId && topicFrom(topicId)) || (brief.knowledge_point_query ? topicByName(brief.knowledge_point_query) : null);
   if (MODES[config.mode]) f.mode = config.mode;
@@ -1253,26 +1987,41 @@ function loadBrief(brief, meta, config) {
   autosize();
 }
 
-// batch：批量出题时是 { count, request }，正在出的是一整批（state.job.batch 为 true）
-function startLive(jobId, chatId, batch = null) {
-  state.job = { id: jobId, chat: chatId, batch: Boolean(batch), count: batch?.count || 1 };
-  state.liveSnapshot = null;
+// extra：批量出题时是 { count, request }，正在出的是一整批（state.job.batch 为 true）；
+// 自动组卷时是 { paper: true, snapshot }（state.job.paper 为 true）
+function startLive(jobId, chatId, extra = null) {
+  const paper = Boolean(extra?.paper);
+  const imports = Boolean(extra?.import);
+  const batch = !paper && !imports && Boolean(extra?.count);
+  state.job = { id: jobId, chat: chatId, batch, paper, import: imports, count: extra?.count || 1 };
+  state.liveSnapshot = paper || imports ? extra.snapshot : null;
+  state.snapshotAt = performance.now();
   writeStorage(sessionStorage, JOB_KEY, state.job);
   if (!state.chat || state.chat.id !== chatId) resetChat(chatId);
   writeStorage(sessionStorage, CHAT_KEY, chatId);
-  const turn = batch ? addBatchTurn() : addTurn();
+  const turn = imports ? addImportTurn() : paper ? addPaperTurn() : batch ? addBatchTurn() : addTurn();
   turn.jobId = jobId;
+  if (imports) {
+    turn.snapshot = extra.snapshot;
+    turn.render({ live: true });
+  }
   if (batch) {
     turn.batchId = jobId;
-    turn.count = batch.count;
-    turn.request = batch.request;
+    turn.count = extra.count;
+    turn.request = extra.request;
+    turn.render({ live: true });
+  }
+  if (paper) {
+    turn.snapshot = extra.snapshot;
     turn.render({ live: true });
   }
   setMode('chat');
-  if (!batch) focusTurn(turn);
+  // 单独一道题马上在右栏显示进度；一批题等第一道写出题干；组卷等整份试卷组好；存题的核对卡片在对话里
+  if (!batch && !paper && !imports) focusTurn(turn);
   scrollToBottom();
   setGeometryBusy(true);
   refreshComposer();
+  renderSessions();
   poll();
 }
 
@@ -1280,16 +2029,23 @@ async function poll() {
   clearTimeout(state.pollTimer);
   if (!state.job) return;
   const jobId = state.job.id;
-  const batch = state.job.batch;
+  const { batch, paper } = state.job;
+  const imports = state.job.import;
   try {
-    const snap = await request(batch ? `/api/batches/${jobId}` : `/api/jobs/${jobId}`);
+    const url = imports ? `/api/imports/${jobId}` : paper ? `/api/assemblies/${jobId}` : batch ? `/api/batches/${jobId}` : `/api/jobs/${jobId}`;
+    const snap = await request(url);
     if (state.job?.id !== jobId) return;
     state.liveSnapshot = snap;
     state.snapshotAt = performance.now();
     const turn = liveTurn();
     if (turn) {
       turn.snapshot = snap;
-      if (batch) {
+      if (imports) {
+        turn.render({ live: true });
+      } else if (paper) {
+        turn.render({ live: true });
+        refreshSlot(turn);
+      } else if (batch) {
         turn.count = snap.count;
         turn.request = turn.request || { brief: snap.brief, meta: snap.meta, config: snap.config };
         turn.render({ live: true });
@@ -1301,7 +2057,7 @@ async function poll() {
       }
     }
     if (snap.status === 'queued' || snap.status === 'running') {
-      state.pollTimer = setTimeout(poll, batch ? 1200 : 700);
+      state.pollTimer = setTimeout(poll, batch || paper || imports ? 1200 : 700);
     } else {
       finishLive(snap);
     }
@@ -1310,8 +2066,12 @@ async function poll() {
       // 服务重启过，进行中的题丢了：把这一轮拿掉
       const turn = liveTurn();
       if (turn && !turn.snapshot) {
-        turn.root.remove();
-        state.chat.turns = state.chat.turns.filter((other) => other !== turn);
+        removeTurn(turn);
+      } else if (turn?.isPaper) {
+        // 组卷做到一半：已经出好的题都在题库里，这一轮说明一下没组完
+        turn.jobId = null;
+        turn.snapshot = { ...turn.snapshot, status: 'failed', error: '服务重启过，这次组卷没有完成。已经现场出好的题都在题库里，可以再组一次。' };
+        turn.render();
       } else if (turn) {
         turn.jobId = null;
       }
@@ -1329,9 +2089,11 @@ async function poll() {
 async function finishBatch(snap) {
   const focused = state.focus?.batchTurn ? state.focus.index : null;
   const chatId = state.job.chat;
+  const sent = state.job.chips ?? null;
   state.job = null;
   writeStorage(sessionStorage, JOB_KEY, null);
   setGeometryBusy(false);
+  clearChips(sent); // 这一批出完了：出题选项恢复成不选
   refreshComposer();
   // 每一道都存成了出题记录：重新打开这个对话，这一批就按记录显示（能看题、组卷、进题库）
   if (state.chat?.id === chatId) await openChat(chatId, { quiet: true, focusBatch: { id: snap.id, index: focused } });
@@ -1342,12 +2104,62 @@ async function finishBatch(snap) {
   else toast(failed ? `出好 ${done} 道，${failed} 道没出成；出好的已收进题库` : `${done} 道题都出好了，已收进题库`);
 }
 
+// 组卷结束：这一轮按最后的结果显示；组成了试卷就在右栏打开整份试卷
+function finishPaper(snap) {
+  const turn = liveTurn();
+  const chatId = state.job.chat;
+  state.job = null;
+  writeStorage(sessionStorage, JOB_KEY, null);
+  setGeometryBusy(false);
+  refreshComposer();
+  if (turn) {
+    turn.jobId = null;
+    turn.snapshot = snap;
+    turn.render();
+    if (snap.paper && state.mode === 'chat') focusTurn(turn);
+  }
+  loadSessions();
+  refreshCounts();
+  loadContext(chatId);
+  if (snap.paper) toast(snap.status === 'cancelled' ? '已停下：用已有的题组成了试卷' : `试卷组好了：${snap.paper.count} 道题，已存进“试卷”`);
+  else if (snap.status === 'cancelled') toast('已停下');
+}
+
+// 识别完了：这一轮换成核对卡片（题目、答案、解析，勾选后存进题库）
+function finishImport(snap) {
+  const turn = liveTurn();
+  const chatId = state.job.chat;
+  state.job = null;
+  writeStorage(sessionStorage, JOB_KEY, null);
+  setGeometryBusy(false);
+  refreshComposer();
+  if (turn) {
+    turn.jobId = null;
+    turn.load(importRecord(snap));
+    turn.render();
+  }
+  loadSessions();
+  loadContext(chatId);
+  if (snap.status === 'cancelled') toast('已停下');
+  else toast(snap.questions.length ? `识别出 ${snap.questions.length} 道题，核对以后再存进题库` : '没有识别出题目');
+}
+
 function finishLive(snap) {
+  if (state.job?.import) {
+    finishImport(snap);
+    return;
+  }
+  if (state.job?.paper) {
+    finishPaper(snap);
+    return;
+  }
   if (state.job?.batch) {
     finishBatch(snap);
     return;
   }
   const turn = liveTurn();
+  const chatId = state.job.chat;
+  const sent = state.job.chips ?? null;
   state.job = null;
   writeStorage(sessionStorage, JOB_KEY, null);
   if (turn) {
@@ -1356,17 +2168,20 @@ function finishLive(snap) {
     renderTurn(turn);
   }
   setGeometryBusy(false);
+  clearChips(sent); // 这道题出完了：出题选项恢复成不选
   refreshComposer();
   loadSessions();
   refreshCounts();
+  loadContext(chatId);
   if (snap.status === 'succeeded') toast('题目出好了，已收进题库');
   else if (snap.status === 'cancelled') toast('已停下');
 }
 
 async function stopJob(turn) {
   if (!turn.jobId) return;
+  const kind = turn.isImport ? 'imports' : turn.isPaper ? 'assemblies' : turn.isBatch ? 'batches' : 'jobs';
   try {
-    await request(turn.isBatch ? `/api/batches/${turn.jobId}/stop` : `/api/jobs/${turn.jobId}/stop`, { method: 'POST' });
+    await request(`/api/${kind}/${turn.jobId}/stop`, { method: 'POST' });
     toast('正在停下：手头这次模型调用结束后就停');
   } catch (error) {
     toast(error.message);
@@ -1404,39 +2219,211 @@ async function loadSessions() {
 function renderSessions() {
   ui.historyList.innerHTML = '';
   const items = [...state.sessions];
-  // 新对话里正在出第一道题：服务器上还没有这个对话，先补一条
+  // 新对话里正在出第一道题（或者在等第一句的回答）：服务器上还没有这个对话，先补一条
+  const now = new Date().toISOString();
   if (state.job && !items.some((session) => session.id === state.job.chat)) {
-    items.unshift({ id: state.job.chat, count: 0, knowledge: '', updated_at: new Date().toISOString(), fresh: true });
+    items.unshift({ id: state.job.chat, count: 0, knowledge: '', updated_at: now, fresh: true, title: state.job.paper ? '组卷' : '' });
+  }
+  if (state.pending && !items.some((session) => session.id === state.pending.chat)) {
+    items.unshift({ id: state.pending.chat, count: 0, knowledge: '', updated_at: now, fresh: true, title: state.pending.text.slice(0, 40), chats: 1 });
   }
   if (!items.length) {
-    ui.historyList.append(el('li', 'history-empty', '出过的题会按对话列在这里。'));
+    ui.historyList.append(el('li', 'history-empty', '对话会列在这里：出的题、组的卷、聊过的问题都在里面。'));
     return;
   }
   for (const session of items) {
     const live = state.job?.chat === session.id;
-    const status = !live && session.last_status && session.last_status !== 'succeeded' ? ` ${session.last_status}` : '';
+    const status = !live && !session.papers && session.last_status && session.last_status !== 'succeeded' ? ` ${session.last_status}` : '';
     const button = el('button', `history-item${live ? ' live' : ''}${status}`);
     button.type = 'button';
+    button.dataset.session = session.id;
     button.setAttribute('aria-current', String(state.mode === 'chat' && state.chat?.id === session.id));
     const meta = el('span', 'meta');
     if (live) {
-      meta.append(el('span', '', session.count ? `${session.count} 道题，正在出下一道` : '正在出题'));
+      meta.append(el('span', '', state.job.paper ? '正在组卷' : session.count ? `${session.count} 道题，正在出下一道` : '正在出题'));
     } else {
-      meta.append(
-        el('span', '', session.count > 1 ? `${session.count} 道题` : TYPE_LABEL[session.question_type] || ''),
-        el('span', 'num', formatWhen(session.updated_at)),
-      );
-      if (session.last_status === 'failed') meta.append(el('span', 'flag', '没出成'));
-      else if (session.last_status === 'cancelled') meta.append(el('span', 'flag', '已停下'));
+      // 有组卷的写"组卷"；出过题的写几道题（一道就写题型）；只聊过天的写"对话"
+      const kind = session.papers ? '组卷'
+        : session.count > 1 ? `${session.count} 道题`
+          : session.count ? TYPE_LABEL[session.question_type] || '' : '对话';
+      meta.append(el('span', '', kind), el('span', 'num', formatWhen(session.updated_at)));
+      if (!session.papers && session.last_status === 'failed') meta.append(el('span', 'flag', '没出成'));
+      else if (!session.papers && session.last_status === 'cancelled') meta.append(el('span', 'flag', '已停下'));
     }
-    const title = (session.knowledge || '').split(' › ').pop() || (session.fresh ? '新对话' : '考点不限');
-    button.append(el('span', 'title', title), meta);
-    button.title = session.knowledge || '';
+    const title = el('span', 'title');
+    // 置顶的对话标题前有一个小图钉
+    if (session.pinned_at) title.insertAdjacentHTML('afterbegin', svg('pin').replace('<svg ', '<svg class="pin-mark" '));
+    title.append(sessionTitle(session));
+    button.append(title, meta);
+    button.title = `${session.knowledge || ''}${session.knowledge ? '\n' : ''}右键：重命名、置顶、删除`;
     button.addEventListener('click', () => openChat(session.id));
+    // 右键（或者键盘上的菜单键）：重命名、置顶、删除
+    button.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      if (session.fresh) return;
+      const box = button.getBoundingClientRect();
+      const fromKeyboard = !event.clientX && !event.clientY;
+      openRailMenu(session, fromKeyboard ? box.left + 24 : event.clientX, fromKeyboard ? box.bottom : event.clientY, button);
+    });
     const item = el('li');
     item.append(button);
     ui.historyList.append(item);
   }
+}
+
+// 对话的名字：你改过的 → 第一句话或试卷名 → 第一道题考的知识点
+function sessionTitle(session) {
+  return session.custom_title || session.title || (session.knowledge || '').split(' › ').pop() || (session.fresh ? '新对话' : '考点不限');
+}
+
+// 重命名：在列表里把标题换成输入框，回车或点到别处保存，Esc 取消；清空保存就恢复成自动的名字
+function renameSession(session) {
+  closeRailMenu();
+  const button = [...ui.historyList.querySelectorAll('.history-item')].find((node) => node.dataset.session === session.id);
+  const title = button?.querySelector('.title');
+  if (!title) return;
+  const input = el('input', 'rename-input');
+  input.type = 'text';
+  input.maxLength = 40;
+  input.value = sessionTitle(session);
+  input.setAttribute('aria-label', '对话名称');
+  const holder = el('div', 'history-item renaming');
+  holder.append(input);
+  button.replaceWith(holder);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async (keep) => {
+    if (done) return;
+    done = true;
+    const value = input.value.trim();
+    if (keep && value !== sessionTitle(session)) {
+      try {
+        await request(`/api/sessions/${encodeURIComponent(session.id)}/rename`, { method: 'POST', body: JSON.stringify({ title: value }) });
+        toast(value ? '已重命名' : '已恢复成自动的名字');
+      } catch (error) {
+        toast(error.message);
+      }
+    }
+    await loadSessions();
+  };
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      finish(true);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      finish(false);
+    }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+// ---------- 对话列表的右键菜单：重命名、置顶、删除（删除前在菜单里确认一次） ----------
+
+const railMenu = { node: null, anchor: null };
+
+function closeRailMenu(restoreFocus = false) {
+  if (!railMenu.node) return;
+  railMenu.node.remove();
+  if (restoreFocus) railMenu.anchor?.focus();
+  railMenu.node = null;
+  railMenu.anchor = null;
+}
+
+function openRailMenu(session, x, y, anchor) {
+  closeRailMenu();
+  closePopover();
+  const menu = el('div', 'popover rail-menu');
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', `对话「${sessionTitle(session)}」`);
+  railMenu.node = menu;
+  railMenu.anchor = anchor;
+  const place = () => {
+    const box = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - box.width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - box.height - 8))}px`;
+  };
+  const item = (label, icon, onClick, className = '') => {
+    const button = el('button', `rail-menu-item${className ? ` ${className}` : ''}`);
+    button.type = 'button';
+    button.setAttribute('role', 'menuitem');
+    button.innerHTML = svg(icon);
+    button.append(el('span', '', label));
+    button.addEventListener('click', onClick);
+    return button;
+  };
+  const confirm = () => {
+    const box = el('div', 'rail-confirm');
+    box.append(
+      el('p', 'ask', `删除「${sessionTitle(session)}」？`),
+      el('p', 'note', '这个对话里的出题记录、聊天和组卷过程会删掉，不能恢复。出好的题已经收进题库、组好的试卷也还在，不受影响。'),
+    );
+    const actions = el('div', 'rail-confirm-actions');
+    const cancel = el('button', 'btn', '取消');
+    cancel.type = 'button';
+    cancel.addEventListener('click', main);
+    const remove = el('button', 'btn danger', '删除');
+    remove.type = 'button';
+    remove.addEventListener('click', () => deleteSession(session, remove));
+    actions.append(cancel, remove);
+    box.append(actions);
+    menu.replaceChildren(box);
+    place();
+    cancel.focus();
+  };
+  function main() {
+    menu.replaceChildren(
+      item('重命名', 'pencil', () => renameSession(session)),
+      item(session.pinned_at ? '取消置顶' : '置顶', 'pin', () => pinSession(session, !session.pinned_at)),
+      item('删除', 'trash', confirm, 'danger'),
+    );
+    place();
+    menu.querySelector('button')?.focus({ preventScroll: true });
+  }
+  document.body.append(menu);
+  main();
+}
+
+async function pinSession(session, pinned) {
+  closeRailMenu(true);
+  try {
+    await request(`/api/sessions/${encodeURIComponent(session.id)}/pin`, { method: 'POST', body: JSON.stringify({ pinned }) });
+    await loadSessions();
+    toast(pinned ? '已置顶' : '已取消置顶');
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function deleteSession(session, button) {
+  if (state.job?.chat === session.id) {
+    toast('这个对话里还有题在出，等它出完或先停止，再删除');
+    return;
+  }
+  if (state.pending?.chat === session.id) {
+    toast('这个对话里还有一句在回答，等它答完再删除');
+    return;
+  }
+  button.disabled = true;
+  try {
+    await request(`/api/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' });
+  } catch (error) {
+    button.disabled = false;
+    toast(error.message);
+    return;
+  }
+  closeRailMenu();
+  // 删的正是打开着的对话：回到起始页
+  if (state.chat?.id === session.id) {
+    resetChat(null);
+    setMode('idle');
+    renderGreeting();
+    shuffleSuggestions();
+  }
+  await loadSessions();
+  toast('已删除对话');
 }
 
 // 打开一个对话：按顺序把每一道题排出来；正在出的那道接在最后
@@ -1454,9 +2441,32 @@ async function openChat(id, { quiet = false, focusBatch = null } = {}) {
     }
   }
   resetChat(id);
-  // 同一批出的题合成一轮（按第一道出现的位置）
+  // 同一批出的题合成一轮（按第一道出现的位置）；聊天、组卷各是一轮；组卷时现场出的题列在组卷那一轮里
   const batches = new Map();
+  const assemblies = new Map();
   for (const record of records) {
+    if (record.kind === 'chat') {
+      addChatTurn(record.text || '', record.attachments || []).show(record);
+      continue;
+    }
+    if (record.kind === 'import') {
+      const turn = addImportTurn();
+      turn.load(record);
+      turn.render();
+      continue;
+    }
+    if (record.kind === 'summary') {
+      appendTurn(new SummaryTurn(record));
+      continue;
+    }
+    if (record.kind === 'paper') {
+      const turn = addPaperTurn();
+      turn.load(record);
+      turn.render();
+      assemblies.set(record.assembly_id, turn);
+      continue;
+    }
+    if (record.request?.meta?.assembly_id) continue;
     const batchId = record.request?.meta?.batch_id;
     if (batchId) {
       if (!batches.has(batchId)) batches.set(batchId, addBatchTurn());
@@ -1488,7 +2498,25 @@ async function openChat(id, { quiet = false, focusBatch = null } = {}) {
     }
     if (turn.request || turn.snapshot) turn.render({ live });
   }
-  if (hasJob && !state.job.batch && !records.some((record) => record.id === state.job.id)) {
+  // 正在识别附件里的题：做完才存记录，这里接上正在做的那一轮
+  if (hasJob && state.job.import && !records.some((record) => record.import_id === state.job.id)) {
+    const turn = addImportTurn();
+    turn.jobId = state.job.id;
+    if (state.liveSnapshot?.id === state.job.id) {
+      turn.snapshot = state.liveSnapshot;
+      turn.render({ live: true });
+    }
+  }
+  // 正在组卷：组完才存记录，这里接上正在组的那一轮
+  if (hasJob && state.job.paper && !assemblies.has(state.job.id)) {
+    const turn = addPaperTurn();
+    turn.jobId = state.job.id;
+    if (state.liveSnapshot?.id === state.job.id) {
+      turn.snapshot = state.liveSnapshot;
+      turn.render({ live: true });
+    }
+  }
+  if (hasJob && !state.job.batch && !state.job.paper && !state.job.import && !records.some((record) => record.id === state.job.id)) {
     const turn = addTurn();
     turn.jobId = state.job.id;
     if (state.liveSnapshot) {
@@ -1496,14 +2524,19 @@ async function openChat(id, { quiet = false, focusBatch = null } = {}) {
       turn.render({ live: true });
     }
   }
+  // 这个对话里还有一句在等回答：接回到最后（回答回来以后就显示在这一轮里）
+  if (state.pending?.chat === id && !state.chat.turns.includes(state.pending.turn)) appendTurn(state.pending.turn);
   setMode('chat');
   const target = focusBatch && batches.get(focusBatch.id);
   if (target && focusBatch.index) showBatchItem(target, focusBatch.index, false);
   else {
-    const last = target || state.chat.turns[state.chat.turns.length - 1];
+    // 右栏放最近的一道题（或组好的试卷）；只聊过天的对话不开右栏
+    const last = target || [...state.chat.turns].reverse()
+      .find((turn) => !turn.isChat && !turn.isSummary && !turn.isImport && !(turn.isPaper && !turn.paper));
     if (last) focusTurn(last);
   }
   scrollToBottom();
+  loadContext(id);
   return true;
 }
 
@@ -1617,6 +2650,32 @@ function bindEvents() {
       submit();
     }
   });
+  // 附件：粘贴截图或文件、拖进输入框、点回形针
+  ui.prompt.addEventListener('paste', (event) => {
+    const files = [...(event.clipboardData?.files || [])];
+    if (!files.length) return;
+    event.preventDefault();
+    addFiles(files);
+  });
+  ui.composer.addEventListener('dragover', (event) => {
+    if (![...(event.dataTransfer?.types || [])].includes('Files')) return;
+    event.preventDefault();
+    ui.composer.classList.add('dropping');
+  });
+  ui.composer.addEventListener('dragleave', (event) => {
+    if (!ui.composer.contains(event.relatedTarget)) ui.composer.classList.remove('dropping');
+  });
+  ui.composer.addEventListener('drop', (event) => {
+    if (!event.dataTransfer?.files?.length) return;
+    event.preventDefault();
+    ui.composer.classList.remove('dropping');
+    addFiles(event.dataTransfer.files);
+  });
+  ui.attachBtn.addEventListener('click', () => ui.attachInput.click());
+  ui.attachInput.addEventListener('change', () => {
+    addFiles(ui.attachInput.files);
+    ui.attachInput.value = '';
+  });
   for (const chip of Object.values(ui.chips)) {
     chip.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -1633,8 +2692,25 @@ function bindEvents() {
   document.addEventListener('click', (event) => {
     if (pop.kind && !pressedInPopover && !event.composedPath().includes(ui.popover)) closePopover();
   });
+  // 换了主题：右栏正在显示的整份试卷按新主题重新载入（预览页四周的底色跟着变）
+  window.addEventListener('tetra:theme', () => {
+    if (state.focus?.isPaper) {
+      state.focus.sheetKey = '';
+      renderSheet(state.focus, { animate: false });
+    }
+  });
+  // 对话列表的右键菜单：点在菜单外面、按 Esc、窗口大小变了或者列表滚动了，就收起来
+  document.addEventListener('pointerdown', (event) => {
+    if (railMenu.node && !event.composedPath().includes(railMenu.node)) closeRailMenu();
+  }, true);
+  window.addEventListener('resize', () => closeRailMenu());
+  ui.historyList.addEventListener('scroll', () => closeRailMenu());
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
+    if (railMenu.node) {
+      closeRailMenu(true);
+      return;
+    }
     if (pop.kind) {
       const anchor = pop.anchor;
       closePopover();
@@ -1806,6 +2882,7 @@ async function reloadTree() {
 }
 
 async function init() {
+  startI18n(); // 选了英文：把界面文字换成英文（题目内容不换）
   ui.prompt.placeholder = PLACEHOLDER.idle;
   if (readStorage(localStorage, RAIL_KEY)) ui.body.classList.add('rail-collapsed');
   startGeometry($('#geometry'));

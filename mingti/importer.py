@@ -62,6 +62,49 @@ class ImportError_(Exception):
     """导入失败，消息直接显示给用户。"""
 
 
+# 从聊天里导入（用户发了图片、文件，说要存进题库）时，没有解析的题由模型补写解析，给用户核对后再存
+SOLVE_INSTRUCTIONS = """你是高中数学老师。下面这道题（question_type、stem、options）是从老师上传的图片或文件里识别出来的，原题没有附答案或解析。
+请先认真解出来，再按试卷参考答案的格式写：
+- answer：最终答案。单选题写一个选项字母，多选题把正确选项字母连着写（比如 ABD），填空题写结果（几个空用“；”隔开），解答题按（1）（2）……写出每一问的结论（证明题写“证明见解析”）。
+- method：【分析】，一句话点明思路，不超过 40 字。
+- steps：【详解】，每一项是解析里的一行推理或计算，用“因为……所以……”“由……得……”衔接；不写“第一步”“1.”这类编号；解答题每一问另起一行，以“(1)”“(2)”开头；只用高中阶段的方法。
+- 题目条件不完整、没法解时，answer 写空字符串，method 写明缺了什么。
+公式用 LaTeX 写在 $…$ 里。只输出 JSON：{"answer": "...", "method": "...", "steps": ["..."]}"""
+
+SOLVE_SCHEMA = {
+    "type": "object",
+    "properties": {"answer": {"type": "string"}, "method": {"type": "string"}, "steps": {"type": "array", "items": {"type": "string"}}},
+    "required": ["answer", "method", "steps"],
+}
+
+
+def complete_solution(item: dict, route, thinking: bool | str) -> dict:
+    """给一道没有解析（或没有答案）的题补上答案和解析：{answer, solution_method, solution_steps}。"""
+    from mingti.answer_key import closing_line
+
+    raw = route.client.request(
+        instructions=SOLVE_INSTRUCTIONS,
+        input_text=json.dumps(
+            {"question_type": item.get("question_type"), "stem": item.get("stem"), "options": item.get("options") or []},
+            ensure_ascii=False,
+        ),
+        action="补写解析",
+        output_schema=SOLVE_SCHEMA,
+        max_tokens=4000,
+        recovery_instruction="只修复 JSON 结构。",
+        thinking=thinking,
+    )
+    result = json.loads(raw["output"][0]["content"][0]["text"])
+    answer = _tidy_answer(result.get("answer"))
+    steps = [step for step in _steps(result.get("steps")) if not re.match(r"^(故|所以|因此)\s*(选|答案为)", step)]
+    closing = closing_line({"question_type": item.get("question_type"), "answer_value": answer, "final_answer": answer})
+    return {
+        "answer": answer,
+        "solution_method": str(result.get("method") or "").strip()[:200],
+        "solution_steps": (steps + ([closing] if closing else []))[:60],
+    }
+
+
 def is_vision(model_name: str) -> bool:
     return bool(VISION.search(model_name or ""))
 
@@ -287,14 +330,21 @@ class ImportJob:
         self.created_at = time.time()
         self.finished_at: float | None = None
         self.lock = threading.Lock()
+        # 从聊天里导入：{session_id, message_id, created_at, text, attachments, thinking, solver_model}；导入对话框里是 None
+        self.chat: dict | None = None
+        self.stage = "recognizing"  # recognizing 识别 → solving 补写解析 → done
+        self.extra: dict[int, dict] = {}  # 第几道题（index）→ 补写的答案和解析
+        self.extra_errors: dict[int, str] = {}
+        self.solving_total = 0
 
 
 class ImportManager:
-    def __init__(self, models, bank, curriculum_for) -> None:
-        """curriculum_for(edition) → 这一版的知识点目录（树）。"""
+    def __init__(self, models, bank, curriculum_for, store=None) -> None:
+        """curriculum_for(edition) → 这一版的知识点目录（树）；store：从聊天里导入时，把核对卡片存进对话。"""
         self.models = models
         self.bank = bank
         self.curriculum_for = curriculum_for
+        self.store = store
         self._jobs: dict[str, ImportJob] = {}
         self._lock = threading.Lock()
 
@@ -303,7 +353,7 @@ class ImportManager:
     def vision_models(self) -> list[dict]:
         return [{**option.public(), "vision": is_vision(option.model)} for option in self.models.options]
 
-    def start(self, files: list[dict], model_id: str | None, edition: str) -> ImportJob:
+    def start(self, files: list[dict], model_id: str | None, edition: str, *, chat: dict | None = None) -> ImportJob:
         if not files:
             raise ImportError_("先选要导入的 PDF 或图片")
         options = self.models.options
@@ -314,6 +364,7 @@ class ImportManager:
         )
         pages = render_pages(files)
         job = ImportJob(f"im_{uuid.uuid4().hex[:10]}", pages, option.id)
+        job.chat = chat
         with self._lock:
             self._jobs[job.id] = job
         threading.Thread(target=self._run, args=(job, edition), name=f"mingti-import-{job.id}", daemon=True).start()
@@ -372,12 +423,72 @@ class ImportManager:
         try:
             with ThreadPoolExecutor(max_workers=3, thread_name_prefix=f"import-{job.id}") as pool:
                 list(pool.map(one, range(len(job.pages))))
+            # 从聊天里导入：没有解析（或答案）的题，请模型补写，给用户核对后再存
+            if job.chat and not job.stop_requested:
+                self._complete_solutions(job)
         except Exception:  # noqa: BLE001 - 识别出错要反馈到界面
             logger.exception("导入 %s 出错", job.id)
         finally:
+            # 先把核对卡片存进对话，再报"做完了"：界面一看到做完就能按卡片存题
+            if job.chat:
+                try:
+                    self._save_card(job)
+                except Exception:  # noqa: BLE001 - 存核对卡片失败要记下来
+                    logger.exception("导入 %s 没能存进对话", job.id)
             with job.lock:
                 job.status = "cancelled" if job.stop_requested else "done"
+                job.stage = "done"
                 job.finished_at = time.time()
+
+    def _complete_solutions(self, job: ImportJob) -> None:
+        from mingti.assistant import CHAT_THINKING
+
+        todo = [q for q in self.questions(job) if not q["solution_steps"] or not q["answer"]]
+        with job.lock:
+            job.stage = "solving"
+            job.solving_total = len(todo)
+        if not todo:
+            return
+        route = self.models.route(job.chat.get("solver_model") or job.model)
+        thinking = CHAT_THINKING.get(job.chat.get("thinking"), "light")
+
+        def one(item: dict) -> None:
+            if job.stop_requested:
+                return
+            try:
+                result = complete_solution(item, route, thinking)
+                with job.lock:
+                    job.extra[item["index"]] = result
+            except Exception as exc:  # noqa: BLE001 - 一道题没补成不影响别的
+                with job.lock:
+                    job.extra_errors[item["index"]] = str(exc)[:200]
+
+        with ThreadPoolExecutor(max_workers=3, thread_name_prefix=f"solve-{job.id}") as pool:
+            list(pool.map(one, todo))
+
+    def _save_card(self, job: ImportJob) -> None:
+        """聊天里的导入做完了：把识别（和补写）的结果存成对话里的一张核对卡片（kind = "import"），等用户确认再存进题库。"""
+        if self.store is None:
+            return
+        snapshot = self.snapshot(job)
+        chat = job.chat
+        self.store.save_message({
+            "id": chat["message_id"],
+            "session_id": chat["session_id"],
+            "created_at": chat["created_at"],
+            "kind": "import",
+            "title": (chat.get("text") or "导入题目")[:40],
+            "text": chat.get("text") or "",
+            "attachments": chat.get("attachments") or [],
+            "import_id": job.id,
+            "status": "review" if snapshot["questions"] else ("cancelled" if job.status == "cancelled" else "empty"),
+            "questions": snapshot["questions"],
+            "errors": snapshot["errors"],
+            "pages": snapshot["pages"],
+            "model": job.model,
+            "saved": 0,
+            "saved_indexes": [],
+        })
 
     # ---- 合并成题目列表 ----
 
@@ -448,6 +559,17 @@ class ImportManager:
             if not item["answer"] and item["solution_steps"] and item["question_type"] == "open_response":
                 item["answer"] = "见解析"
             item["knowledge"] = kp_index.get(item.pop("kp_name", ""), "")
+            # 从聊天里导入时补写的答案、解析（原题没有的）
+            extra = job.extra.get(index)
+            if extra:
+                if not item["answer"] or item["answer"] == "见解析" and not item["solution_steps"]:
+                    item["answer"] = extra["answer"] or item["answer"]
+                if not item["solution_steps"]:
+                    item["solution_steps"] = extra["solution_steps"]
+                    item["solution_method"] = extra["solution_method"]
+                item["generated_solution"] = True
+            elif index in job.extra_errors:
+                item["solve_error"] = job.extra_errors[index]
             item["warnings"] = _warnings(item)
             item.pop("truncated", None)
         return merged
@@ -457,15 +579,23 @@ class ImportManager:
             done = len(job.results) + len(job.errors)
             errors = [f"第 {n + 1} 页：{text}" for n, text in sorted(job.errors.items())]
             status, saved = job.status, job.saved
+        with job.lock:
+            stage, solved, solving = job.stage, len(job.extra) + len(job.extra_errors), job.solving_total
         return {
             "id": job.id,
             "status": status,
+            "stage": stage,
             "model": job.model,
             "pages": len(job.pages),
             "pages_done": done,
+            "solving": solving,
+            "solved": solved,
             "errors": errors,
             "questions": self.questions(job),
             "saved": saved,
+            "message_id": (job.chat or {}).get("message_id"),
+            "text": (job.chat or {}).get("text"),
+            "attachments": (job.chat or {}).get("attachments") or [],
         }
 
     def save(self, job: ImportJob, picked: list[dict]) -> int:

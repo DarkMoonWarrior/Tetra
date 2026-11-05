@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mingti.question_authoring.schemas import GradeLevel, QuestionType
 
@@ -75,8 +76,8 @@ class AgentSettings(BaseModel):
     mode: AgentMode = "fast"
     # 思考强度：high 在构造题目、审题、规划解法、复核时打开模型的思考模式；max 同样这几步，
     # 但用模型最深的一档思考；medium 只在构造题目、改题和规划解法时打开，审题、复核不开；low 都不开，最快。
-    # 4、5 星的题这里选低或中时按 high 出（见 jobs.JobManager.submit）
-    thinking: Literal["low", "medium", "high", "max"] = "high"
+    # 4、5 星的题这里选低或中时按 high 出（见 jobs.JobManager.submit）。默认中（用户 11-05 要求）
+    thinking: Literal["low", "medium", "high", "max"] = "medium"
     model: str | None = Field(default=None, max_length=120)
     lanes: int = Field(default=1, ge=1, le=3)
     verify: bool = False
@@ -104,14 +105,29 @@ class Learning(BaseModel):
     feedback: list[Feedback] = Field(default_factory=list)
 
 
+# 头像：界面把上传的图片裁成正方形、缩到 256×256 以后存成 data URL（几十 KB），空字符串表示没有头像
+AVATAR_MAX = 400_000
+_AVATAR = re.compile(r"data:image/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+")
+
+
+def _check_avatar(value: str | None) -> str | None:
+    if value and not _AVATAR.fullmatch(value):
+        raise ValueError("头像要是 PNG、JPEG、WebP 或 GIF 图片")
+    return value
+
+
 class Profile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int = 0
     display_name: str = Field(default="", max_length=20)
+    avatar: str = Field(default="", max_length=AVATAR_MAX)
     grade: GradeLevel | Literal[""] = ""
     # 教材版本：知识点目录按哪一版整理（人教 A 版 / 人教 B 版，都是 2019 年版）
     textbook: Literal["pep_a", "pep_b"] = "pep_a"
+    # 界面：主题（白天 light、夜晚 dark、跟随系统 system）和语言（中文 zh、英文 en；题目内容不翻译）
+    theme: Literal["light", "dark", "system"] = "light"
+    language: Literal["zh", "en"] = "zh"
     defaults: Defaults = Field(default_factory=Defaults)
     agent: AgentSettings = Field(default_factory=AgentSettings)
     learning: Learning = Field(default_factory=Learning)
@@ -124,11 +140,19 @@ class ProfileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     display_name: str | None = Field(default=None, max_length=20)
+    avatar: str | None = Field(default=None, max_length=AVATAR_MAX)  # 空字符串 = 去掉头像
     grade: GradeLevel | Literal[""] | None = None
     textbook: Literal["pep_a", "pep_b"] | None = None
+    theme: Literal["light", "dark", "system"] | None = None
+    language: Literal["zh", "en"] | None = None
     defaults: Defaults | None = None
     agent: AgentSettings | None = None
     learning_enabled: bool | None = None
+
+    @field_validator("avatar")
+    @classmethod
+    def _avatar_format(cls, value: str | None) -> str | None:
+        return _check_avatar(value)
 
 
 def _current(profile: Profile, key: str):

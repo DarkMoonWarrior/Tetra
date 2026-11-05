@@ -232,6 +232,7 @@ class BankStore:
                 stem=str(item["stem"])[:20000],
                 options=[Option(key=str(o["key"])[:4], text=str(o["text"])[:4000]) for o in item.get("options") or []][:8],
                 answer=str(item.get("answer") or "")[:4000],
+                solution_method=str(item.get("solution_method") or "")[:8000],
                 solution_steps=[str(step) for step in item.get("solution_steps") or []][:60],
                 figure_svg=figure_svg,
             )
@@ -324,6 +325,16 @@ class BankStore:
                 }
             )
         return listed
+
+    def used_in_papers(self) -> set[str]:
+        """已经组进某份试卷的题（自动组卷时优先挑没用过的）。"""
+        with self._connect() as db:
+            rows = db.execute("select data_json from papers").fetchall()
+        used: set[str] = set()
+        for row in rows:
+            for item in json.loads(row["data_json"]).get("items", []):
+                used.add(item.get("bank_id"))
+        return used
 
     def paper(self, paper_id: str) -> dict | None:
         with self._connect() as db:

@@ -4,6 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tetra 命题智能体</title>
+  <script>
+    // 页面一打开就按本机记住的主题、语言上色和标注，不等个人设置读回来（免得先闪一下白底）
+    (function () {
+      try {
+        var theme = localStorage.getItem('mingti.theme') || 'light';
+        var dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+        if (localStorage.getItem('mingti.lang') === 'en') document.documentElement.lang = 'en';
+      } catch (error) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d0d0d'/%3E%3Cg fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15.8 5.5 6 21.5l7.6 5.2 12.6-6.1Z'/%3E%3Cpath d='M15.8 5.5 13.6 26.7'/%3E%3Cpath d='M6 21.5 26.2 20.6' stroke-width='1.4' stroke-dasharray='2 2.3'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="vendor/katex/katex.min.css">
   <link rel="stylesheet" href="app.css">
@@ -134,7 +147,10 @@
   </div>
 
   <form class="composer" id="composer" autocomplete="off">
-    <textarea id="prompt" rows="2" aria-label="补充要求" placeholder="补充要求写在这里"></textarea>
+    <!-- 附件：粘贴、拖进来或者点回形针添加的图片、PDF、文本文件（见 js/app.js 的附件部分） -->
+    <div class="attach-tray" id="attachTray" hidden></div>
+    <textarea id="prompt" rows="2" aria-label="出题要求或问题" placeholder="说说想出什么题，也可以直接问问题"></textarea>
+    <input type="file" id="attachInput" multiple accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.pdf,.txt,.md" hidden>
     <div class="composer-row">
       <div class="chips">
         <button type="button" class="chip" id="kpChip" data-pop="kp" aria-haspopup="dialog" aria-expanded="false"></button>
@@ -144,8 +160,10 @@
         <button type="button" class="chip" id="useChip" data-pop="use" aria-haspopup="dialog" aria-expanded="false"></button>
       </div>
       <div class="composer-tools">
+        <button type="button" class="chip tool attach-btn" id="attachBtn" aria-label="添加图片或文件" title="添加图片、PDF 或文本文件：也可以直接粘贴截图，或者拖进输入框"></button>
+        <button type="button" class="chip tool ctx-chip" id="ctxChip" data-pop="context" aria-haspopup="dialog" aria-expanded="false" hidden></button>
         <button type="button" class="chip tool" id="modelChip" data-pop="model" aria-haspopup="dialog" aria-expanded="false"></button>
-        <button type="submit" class="send" id="sendBtn" aria-label="出题" title="出题">
+        <button type="submit" class="send" id="sendBtn" aria-label="发送" title="发送">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
         </button>
       </div>

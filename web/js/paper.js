@@ -2,6 +2,7 @@
 // 右栏是试卷预览，和导出的 PDF、打印出来的样子一致（都由后端的打印页生成）。
 
 import { $, DIFFICULTY_LABEL, TYPE_LABEL, el, formatWhen, mathText, renderMath, request, segmented, toast } from './shared.js';
+import { isDark } from './theme.js';
 
 const TYPE_ORDER = ['single_choice', 'multiple_choice', 'fill_blank', 'open_response'];
 const SECTION_TITLE = { single_choice: '单项选择题', multiple_choice: '多项选择题', fill_blank: '填空题', open_response: '解答题' };
@@ -30,6 +31,45 @@ export function defaultScore(type) {
   return DEFAULT_SCORE[type] || 5;
 }
 
+// 导出一份试卷（Word 或 PDF）并下载；trigger 是点的那个按钮，生成期间改成"正在生成…"
+export async function downloadPaper(paperId, { format, answers = true, title = '试卷', trigger = null }) {
+  const label = trigger?.textContent;
+  if (trigger) {
+    trigger.disabled = true;
+    trigger.textContent = format === 'pdf' ? '正在生成 PDF…' : '正在生成 Word…';
+  }
+  try {
+    const response = await fetch(`/api/papers/${paperId}/export?format=${format}&answers=${answers}`);
+    if (!response.ok) {
+      let detail = '';
+      try {
+        detail = (await response.json()).detail;
+      } catch {
+        // 不是 JSON，按状态码提示
+      }
+      throw new Error(detail || `导出失败（${response.status}）`);
+    }
+    const blob = await response.blob();
+    const name = filenameFrom(response.headers.get('Content-Disposition')) || `${title}.${format}`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast(`已导出：${name}`);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    if (trigger) {
+      trigger.disabled = false;
+      trigger.textContent = label;
+    }
+  }
+}
+
 export class Papers {
   constructor(shell) {
     this.shell = shell;
@@ -39,6 +79,10 @@ export class Papers {
     this.saving = null;
     this.confirmingDelete = false;
     this.frame = null;
+    // 换了主题：正在看的试卷预览按新主题重新载入
+    window.addEventListener('tetra:theme', () => {
+      if (this.paper && this.frame?.isConnected) this.renderPreview();
+    });
   }
 
   open() {
@@ -396,42 +440,12 @@ export class Papers {
       this.frame.title = '试卷预览';
     }
     panel.frame(this.frame);
-    this.frame.src = `/api/papers/${this.paper.id}/print?answers=${this.paper.show_answers}&v=${encodeURIComponent(this.paper.updated_at)}`;
+    this.frame.src = `/api/papers/${this.paper.id}/print?answers=${this.paper.show_answers}&dark=${isDark()}&v=${encodeURIComponent(this.paper.updated_at)}`;
   }
 
   async download(format, trigger) {
     await this.flush();
-    const label = trigger.textContent;
-    trigger.disabled = true;
-    trigger.textContent = format === 'pdf' ? '正在生成 PDF…' : '正在生成 Word…';
-    try {
-      const response = await fetch(`/api/papers/${this.paper.id}/export?format=${format}&answers=${this.paper.show_answers}`);
-      if (!response.ok) {
-        let detail = '';
-        try {
-          detail = (await response.json()).detail;
-        } catch {
-          // 不是 JSON，按状态码提示
-        }
-        throw new Error(detail || `导出失败（${response.status}）`);
-      }
-      const blob = await response.blob();
-      const name = filenameFrom(response.headers.get('Content-Disposition')) || `${this.paper.title}.${format}`;
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = name;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      toast(`已导出：${name}`);
-    } catch (error) {
-      toast(error.message);
-    } finally {
-      trigger.disabled = false;
-      trigger.textContent = label;
-    }
+    await downloadPaper(this.paper.id, { format, answers: this.paper.show_answers, title: this.paper.title, trigger });
   }
 
   async print() {

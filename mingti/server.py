@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+import re
+import uuid
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Literal
 from urllib.parse import quote
@@ -13,7 +15,11 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from mingti import context
 from mingti.answer_key import condense, model_call
+from mingti.assemble import AssemblyManager
+from mingti.assistant import Assistant, bank_summary
+from mingti.attachments import AttachmentError, Uploads
 from mingti.bank import BankQuestion, BankStore, Paper
 from mingti.config import BLUEPRINT_JSON, CURRICULA, CURRICULUM_CSV, RUNTIME_DIR, WEB_DIR, load_settings
 from mingti.curriculum_tree import load_tree
@@ -45,7 +51,10 @@ store = QuestionStore(RUNTIME_DIR / "questions.sqlite3")
 profiles = ProfileStore(RUNTIME_DIR / "profile.json")
 bank = BankStore(RUNTIME_DIR / "bank.sqlite3", backfill_from=store.all_records)
 manager = JobManager(settings, CURRICULUM_CSV, RUNTIME_DIR, store, models, bank=bank)
-importer = ImportManager(models, bank, lambda edition: _curriculum(edition))
+importer = ImportManager(models, bank, lambda edition: _curriculum(edition), store=store)
+uploads = Uploads()
+assistant = Assistant(models, store, manager.model_runs, uploads=uploads)
+assemblies = AssemblyManager(manager, bank, store, models, lambda edition: _curriculum(edition), lambda: profiles.load())
 
 app = FastAPI(title="命题智能体")
 
@@ -251,6 +260,246 @@ def stop_batch(batch_id: str) -> dict:
     return {"stopping": True}
 
 
+# ---------- 对话助手：先判断是聊天、出题还是组卷；聊天直接回答 ----------
+
+
+class AssistantRequest(BaseModel):
+    text: str = Field(default="", max_length=4000)
+    attachments: list[str] = Field(default_factory=list, max_length=10)  # 附件编号（/api/uploads 返回的）
+    language: Literal["zh", "en"] = "zh"  # 界面语言：en 时回答用英文
+    session_id: str = Field(default="", max_length=40)
+    model: str | None = Field(default=None, max_length=160)
+    thinking: Literal["low", "medium", "high", "max"] = "medium"  # 输入框右下角显示的那一档
+    touched: bool = False  # 用户刚在输入框下方调过题型、难度这些出题选项
+    current: dict = Field(default_factory=dict)  # 输入框下方现在的出题选项
+
+
+def _session_id(raw: str) -> str:
+    return raw if re.fullmatch(r"[A-Za-z0-9_-]{4,40}", raw or "") else f"c_{uuid.uuid4().hex[:10]}"
+
+
+@app.post("/api/assistant")
+def ask_assistant(payload: AssistantRequest) -> dict:
+    if not models.options:
+        raise HTTPException(503, NO_MODEL)
+    if not payload.text.strip() and not payload.attachments:
+        raise HTTPException(400, "写一句话，或者附上图片、文件再发")
+    profile = profiles.load()
+    session_id = _session_id(payload.session_id)
+    try:
+        answer = assistant.respond(
+            text=payload.text.strip(),
+            attachments=payload.attachments,
+            language=payload.language,
+            session_id=session_id,
+            model_id=payload.model,
+            thinking=payload.thinking,
+            touched=payload.touched,
+            current=payload.current,
+            profile={
+                "name": profile.display_name,
+                "grade": profile.grade,
+                "textbook": CURRICULA.get(profile.textbook, CURRICULA["pep_a"])[0],
+            },
+            bank={**bank_summary(bank.items()), "papers": bank.counts()["papers"]},
+        )
+    except AttachmentError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except DeepSeekClientError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(502, f"模型的回答没读出来（{exc}），再发一次试试") from exc
+    return {**answer, "context": context.stats(store.session(session_id))}
+
+
+# ---------- 聊天里的附件：先传上来，发消息时带编号 ----------
+
+
+class UploadRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    data: str = Field(min_length=10, max_length=36_000_000)  # data URL（25 MB 的文件 base64 以后约 34 MB）
+    thumb: str = Field(default="", max_length=150_000)  # 界面生成的缩略图（data URL），存进聊天记录
+
+
+@app.post("/api/uploads")
+def upload_attachment(payload: UploadRequest) -> dict:
+    try:
+        return uploads.add(payload.name, payload.data, payload.thumb)
+    except AttachmentError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+class ChatImportRequest(BaseModel):
+    session_id: str = Field(default="", max_length=40)
+    uploads: list[str] = Field(min_length=1, max_length=10)
+    text: str = Field(default="", max_length=4000)
+    model: str | None = Field(default=None, max_length=160)
+    thinking: Literal["low", "medium", "high", "max"] = "medium"
+    edition: Literal["pep_a", "pep_b"] | None = None
+
+
+@app.post("/api/chat-imports")
+def start_chat_import(payload: ChatImportRequest) -> dict:
+    """把附件里的题存进题库：识别题目，没有解析的补写解析，做完存成对话里的一张核对卡片，用户确认后才存。"""
+    if not models.options:
+        raise HTTPException(503, NO_MODEL)
+    session_id = _session_id(payload.session_id)
+    try:
+        files = uploads.files(payload.uploads)
+        if not files:
+            raise AttachmentError("存进题库要用图片或 PDF（文本文件里的题请直接复制到输入框）")
+        vision = assistant.vision_route(payload.model)
+        chat = {
+            "session_id": session_id,
+            "message_id": f"m_{uuid.uuid4().hex[:12]}",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "text": payload.text.strip(),
+            "attachments": assistant.attachment_cards(payload.uploads),
+            "thinking": payload.thinking,
+            "solver_model": payload.model or vision.id,
+        }
+        job = importer.start(files, vision.id, payload.edition or profiles.load().textbook, chat=chat)
+    except (AttachmentError, ImportError_) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {**importer.snapshot(job), "session_id": session_id}
+
+
+class ImportDecision(BaseModel):
+    indexes: list[int] = Field(default_factory=list, max_length=400)  # 要存的题（核对卡片上勾选的）
+    decline: bool = False  # 不存了
+
+
+@app.post("/api/messages/{message_id}/import")
+def decide_chat_import(message_id: str, payload: ImportDecision) -> dict:
+    """核对卡片上点了"存入题库"（或"不存"）：按卡片上存的题目存，服务重启过也能存。"""
+    message = store.get_message(message_id)
+    if message is None or message.get("kind") != "import":
+        raise HTTPException(404, "这张核对卡片不存在（可能对话已经删掉了）")
+    if message.get("status") == "saved":
+        raise HTTPException(409, "这些题已经存进题库了")
+    questions = message.get("questions") or []
+    saved = []
+    if not payload.decline:
+        for index in payload.indexes:
+            if 0 <= index < len(questions) and bank.add_imported(questions[index], source_id=f"import:{message.get('import_id')}:{index}"):
+                saved.append(index)
+        if payload.indexes and not saved:
+            raise HTTPException(409, "没存进去：这些题可能已经在题库里了")
+    message.update(status="declined" if payload.decline else "saved", saved=len(saved), saved_indexes=saved)
+    store.save_message(message)
+    return {"message": message, "saved": len(saved), "counts": bank.counts()}
+
+
+# ---------- 上下文：这个对话带给模型的前文有多长；可以把前面的内容压缩成摘要 ----------
+
+
+class CompressRequest(BaseModel):
+    model: str | None = Field(default=None, max_length=160)
+    auto: bool = False  # 自动压缩：只在上下文超额时才压缩，没超额就什么都不做
+
+
+@app.get("/api/sessions/{session_id}/context")
+def session_context(session_id: str) -> dict:
+    return context.stats(store.session(session_id))
+
+
+@app.post("/api/sessions/{session_id}/compress")
+def compress_session(session_id: str, payload: CompressRequest) -> dict:
+    if not models.options:
+        raise HTTPException(503, NO_MODEL)
+    try:
+        summary = assistant.compress(session_id, payload.model, auto=payload.auto)
+    except context.NothingToCompress as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except DeepSeekClientError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(502, f"摘要没写成（{exc}），再试一次") from exc
+    return {"summary": summary, "context": context.stats(store.session(session_id))}
+
+
+# ---------- 对话列表：置顶、删除 ----------
+
+
+class PinRequest(BaseModel):
+    pinned: bool = True
+
+
+def _session_busy(session_id: str) -> bool:
+    """这个对话里还有题在出（单道、一批或者组卷）。"""
+    with manager._lock:
+        jobs = list(manager._jobs.values())
+        batches = list(manager._batches.values())
+    if any(job.session_id == session_id and job.finished_at is None for job in jobs):
+        return True
+    if any(batch.session_id == session_id and batch.finished_at is None for batch in batches):
+        return True
+    return assemblies.busy(session_id)
+
+
+@app.post("/api/sessions/{session_id}/pin")
+def pin_session(session_id: str, payload: PinRequest) -> dict:
+    store.pin(session_id, payload.pinned)
+    return {"pinned": payload.pinned}
+
+
+class RenameRequest(BaseModel):
+    title: str = Field(default="", max_length=40)  # 空字符串：恢复成自动的名字
+
+
+@app.post("/api/sessions/{session_id}/rename")
+def rename_session(session_id: str, payload: RenameRequest) -> dict:
+    store.rename(session_id, payload.title)
+    return {"title": payload.title.strip()}
+
+
+@app.delete("/api/sessions/{session_id}")
+def delete_session(session_id: str) -> dict:
+    if _session_busy(session_id):
+        raise HTTPException(409, "这个对话里还有题在出，等它出完或先停止，再删除")
+    return {"deleted": store.delete_session(session_id)}
+
+
+# ---------- 自动组卷：按一句话的要求定方案、从题库挑题，不够的现场出题，组成试卷 ----------
+
+
+class AssemblyRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    session_id: str = Field(default="", max_length=40)
+    config: dict = Field(default_factory=dict)
+    meta: dict = Field(default_factory=dict)
+
+
+@app.post("/api/assemblies")
+def create_assembly(payload: AssemblyRequest) -> dict:
+    if not manager.ready:
+        raise HTTPException(503, NO_MODEL)
+    meta = {
+        "edition": payload.meta.get("edition") if payload.meta.get("edition") in CURRICULA else profiles.load().textbook,
+        "detail": payload.meta.get("detail") or profiles.load().defaults.solution_detail,
+    }
+    assembly = assemblies.start(payload.text, _session_id(payload.session_id), payload.config, meta)
+    return assemblies.snapshot(assembly)
+
+
+def _assembly_or_404(assembly_id: str):
+    assembly = assemblies.get(assembly_id)
+    if assembly is None:
+        raise HTTPException(404, "任务不存在（服务重启后进行中的任务会丢失）")
+    return assembly
+
+
+@app.get("/api/assemblies/{assembly_id}")
+def assembly_status(assembly_id: str) -> dict:
+    return assemblies.snapshot(_assembly_or_404(assembly_id))
+
+
+@app.post("/api/assemblies/{assembly_id}/stop")
+def stop_assembly(assembly_id: str) -> dict:
+    assemblies.stop(_assembly_or_404(assembly_id).id)
+    return {"stopping": True}
+
+
 @app.get("/api/questions")
 def questions() -> list[dict]:
     return store.list()
@@ -358,6 +607,14 @@ def counts() -> dict:
 @app.get("/api/bank")
 def bank_items() -> dict:
     return {"items": bank.items(), "counts": bank.counts()}
+
+
+@app.get("/api/bank/{item_id}")
+def bank_item(item_id: str) -> dict:
+    item = bank.get(item_id)
+    if item is None:
+        raise HTTPException(404, "题库里没有这道题（可能已经删掉了）")
+    return item
 
 
 @app.post("/api/bank")
@@ -552,9 +809,10 @@ def delete_paper(paper_id: str) -> dict:
 
 @app.get("/api/papers/{paper_id}/print", response_class=HTMLResponse)
 def print_paper(
-    paper_id: str, answers: bool = True, auto: bool = False, part: Literal["all", "exam", "answers"] = "all"
+    paper_id: str, answers: bool = True, auto: bool = False, part: Literal["all", "exam", "answers"] = "all",
+    dark: bool = False,
 ) -> str:
-    return print_html(_paper_or_404(paper_id), answers=answers, auto_print=auto, part=part)
+    return print_html(_paper_or_404(paper_id), answers=answers, auto_print=auto, part=part, dark=dark)
 
 
 @app.get("/api/papers/{paper_id}/export")

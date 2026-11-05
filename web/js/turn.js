@@ -113,10 +113,12 @@ export class Turn {
   renderTask() {
     const { brief = {}, meta = {}, config } = this.snapshot;
     this.task.innerHTML = '';
-    if (meta.follow_up) this.task.append(el('p', 'lead', meta.follow_up));
+    // said：用户在输入框里说的原话（助手判断是出题时）；下面是助手整理成的出题要求
+    if (meta.said) this.task.append(el('p', 'said', meta.said));
+    else if (meta.follow_up) this.task.append(el('p', 'lead', meta.follow_up));
     this.task.append(el('p', 'ask', brief.request_text || ''));
     const note = meta.note ?? (meta.follow_up ? '' : brief.additional_constraints);
-    if (note) this.task.append(el('p', 'extra', note));
+    if (note && note !== meta.said) this.task.append(el('p', 'extra', note));
     const tags = el('div', 'config');
     if (meta.knowledge_label) tags.append(el('span', '', meta.knowledge_label));
     else if (meta.open_topic) tags.append(el('span', '', '考点不限'));

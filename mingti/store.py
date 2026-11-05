@@ -1,6 +1,7 @@
 """命题记录：每次命题（成功或失败）都存进 SQLite，供"题目记录"页和实验统计使用。
 
 同一个对话里可以连着出好几道题，session_id 记的就是属于哪个对话；以前的记录各自算一个对话。
+对话里除了出题，还有聊天（问候、答疑）和自动组卷，这两种存在 messages 表里，和出题记录按时间排在一起。
 """
 
 from __future__ import annotations
@@ -8,7 +9,17 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _when(stamp: str | None) -> datetime:
+    """记录里的时间（ISO 格式）→ 可以比较先后的时间（没写时区的按 UTC）；读不出来的排在最前。"""
+    try:
+        moment = datetime.fromisoformat(str(stamp))
+    except ValueError:
+        return datetime(2000, 1, 1, tzinfo=timezone.utc)
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
 def curriculum_label(result: dict | None) -> str:
@@ -53,6 +64,24 @@ class QuestionStore:
                 db.execute("alter table questions add column session_id text")
             db.execute("update questions set session_id = id where session_id is null")
             db.execute("create index if not exists questions_session on questions (session_id, created_at)")
+            # 聊天和自动组卷：kind 是 chat（一问一答）或 paper（一次组卷）；title 用作对话列表里的标题
+            db.execute(
+                """
+                create table if not exists messages (
+                    id text primary key,
+                    session_id text not null,
+                    created_at text not null,
+                    kind text not null,
+                    title text not null default '',
+                    data_json text not null
+                )
+                """
+            )
+            db.execute("create index if not exists messages_session on messages (session_id, created_at)")
+            # 对话列表里置顶的对话（置顶时间越晚越靠前），以及用户自己改的对话名称
+            db.execute("create table if not exists session_flags (session_id text primary key, pinned_at text)")
+            if "title" not in {row[1] for row in db.execute("pragma table_info(session_flags)")}:
+                db.execute("alter table session_flags add column title text")
             # 以前没选考点的记录在列表里显示"未指定考点"；按出好的题实际考的知识点补上
             for record_id, result in db.execute(
                 "select id, result_json from questions where coalesce(knowledge, '') = '' and result_json is not null"
@@ -114,7 +143,8 @@ class QuestionStore:
         return [dict(row) for row in rows]
 
     def sessions(self, limit: int = 100) -> list[dict]:
-        """对话列表，最近有动静的在前；标题用第一道题考的知识点。"""
+        """对话列表，最近有动静的在前。标题：对话从出题开始的，用第一道题考的知识点；
+        从聊天或组卷开始的，用那一句话或那份试卷的名字（title）。"""
         with self._connect() as db:
             rows = db.execute(
                 """
@@ -130,20 +160,130 @@ class QuestionStore:
                         order by created_at desc limit 1) as last_status
                 from questions q
                 group by session_id
-                order by updated_at desc
-                limit ?
-                """,
-                (limit,),
+                """
             ).fetchall()
-        return [dict(row) for row in rows]
+            talks = db.execute(
+                """
+                select session_id as id,
+                       min(created_at) as started_at,
+                       max(created_at) as updated_at,
+                       sum(kind = 'chat') as chats,
+                       sum(kind = 'paper') as papers,
+                       (select title from messages f where f.session_id = m.session_id
+                        order by created_at asc limit 1) as title
+                from messages m
+                group by session_id
+                """
+            ).fetchall()
+            flags = db.execute("select session_id, pinned_at, title from session_flags").fetchall()
+        pinned = {row["session_id"]: row["pinned_at"] for row in flags if row["pinned_at"]}
+        renamed = {row["session_id"]: row["title"] for row in flags if row["title"]}
+        merged = {row["id"]: {**dict(row), "chats": 0, "papers": 0, "title": ""} for row in rows}
+        for talk in talks:
+            session = merged.get(talk["id"])
+            if session is None:
+                merged[talk["id"]] = {
+                    "id": talk["id"], "started_at": talk["started_at"], "updated_at": talk["updated_at"], "count": 0,
+                    "knowledge": "", "question_type": None, "last_status": None,
+                    "chats": talk["chats"], "papers": talk["papers"], "title": talk["title"],
+                }
+                continue
+            session.update(chats=talk["chats"], papers=talk["papers"])
+            if _when(talk["started_at"]) < _when(session["started_at"]):
+                session["title"] = talk["title"]
+                session["started_at"] = talk["started_at"]
+            if _when(talk["updated_at"]) > _when(session["updated_at"]):
+                session["updated_at"] = talk["updated_at"]
+        for session in merged.values():
+            session["pinned_at"] = pinned.get(session["id"])
+            session["custom_title"] = renamed.get(session["id"]) or ""
+        # 置顶的在最前（后置顶的在前），其余按最近有动静的在前
+        top = sorted((s for s in merged.values() if s["pinned_at"]), key=lambda s: _when(s["pinned_at"]), reverse=True)
+        rest = sorted((s for s in merged.values() if not s["pinned_at"]), key=lambda s: _when(s["updated_at"]), reverse=True)
+        return (top + rest)[:limit]
+
+    def pin(self, session_id: str, pinned: bool) -> None:
+        with self._lock, self._connect() as db:
+            db.execute(
+                "insert into session_flags (session_id, pinned_at) values (?, ?) "
+                "on conflict(session_id) do update set pinned_at = excluded.pinned_at",
+                (session_id, datetime.now(timezone.utc).isoformat() if pinned else None),
+            )
+
+    def rename(self, session_id: str, title: str) -> None:
+        """用户给对话起的名字；空字符串表示恢复成自动的名字（第一道题的考点、第一句话或试卷名）。"""
+        with self._lock, self._connect() as db:
+            db.execute(
+                "insert into session_flags (session_id, title) values (?, ?) "
+                "on conflict(session_id) do update set title = excluded.title",
+                (session_id, title.strip()[:40] or None),
+            )
+
+    def delete_session(self, session_id: str) -> int:
+        """删掉一个对话：它的出题记录、聊天、组卷和摘要。题库里的题和试卷是另存的，不受影响。"""
+        with self._lock, self._connect() as db:
+            removed = db.execute("delete from questions where session_id = ?", (session_id,)).rowcount
+            removed += db.execute("delete from messages where session_id = ?", (session_id,)).rowcount
+            db.execute("delete from session_flags where session_id = ?", (session_id,))
+        return removed
 
     def session(self, session_id: str) -> list[dict]:
-        """一个对话里的全部出题记录，按先后顺序。"""
+        """一个对话里的全部内容，按先后顺序：出题记录（kind = "question"），以及聊天、组卷（kind = "chat"/"paper"）。"""
         with self._connect() as db:
             rows = db.execute(
                 "select * from questions where session_id = ? order by created_at asc", (session_id,)
             ).fetchall()
-        return [self._record(row) for row in rows]
+            talks = db.execute(
+                "select * from messages where session_id = ? order by created_at asc", (session_id,)
+            ).fetchall()
+        entries = [{**self._record(row), "kind": "question"} for row in rows]
+        entries += [self._message(row) for row in talks]
+        return sorted(entries, key=lambda entry: _when(entry["created_at"]))
+
+    # ---------- 聊天、组卷 ----------
+
+    def save_message(self, message: dict) -> dict:
+        """message：{id, session_id, created_at, kind, title, ...其余内容}；同一个 id 再存一次就是更新。"""
+        body = {key: value for key, value in message.items() if key not in ("id", "session_id", "created_at", "kind", "title")}
+        with self._lock, self._connect() as db:
+            db.execute(
+                """
+                insert or replace into messages (id, session_id, created_at, kind, title, data_json)
+                values (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    message["id"],
+                    message["session_id"],
+                    message["created_at"],
+                    message["kind"],
+                    str(message.get("title") or "")[:80],
+                    json.dumps(body, ensure_ascii=False),
+                ),
+            )
+        return message
+
+    def get_message(self, message_id: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute("select * from messages where id = ?", (message_id,)).fetchone()
+        return None if row is None else self._message(row)
+
+    def recent_messages(self, session_id: str, limit: int = 12) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute(
+                "select * from messages where session_id = ? order by created_at desc limit ?", (session_id, limit)
+            ).fetchall()
+        return [self._message(row) for row in reversed(rows)]
+
+    @staticmethod
+    def _message(row: sqlite3.Row) -> dict:
+        return {
+            **json.loads(row["data_json"] or "{}"),
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "created_at": row["created_at"],
+            "kind": row["kind"],
+            "title": row["title"],
+        }
 
     def get(self, record_id: str) -> dict | None:
         with self._connect() as db:

@@ -1,0 +1,21 @@
+{
+  "解析": "Solution",
+  "出题": "Generate",
+  "题目出好了": "Question ready",
+  "考查 {0}": "Topic: {0}",
+  "试卷": "Papers",
+  "考点不限": "Any topic",
+  "对比实验": "Experiments",
+  "白天": "Light",
+  "夜晚": "Dark",
+  "想出一道什么样的题？": "What kind of question shall we make?",
+  "高中": "high school",
+  "请出一道{0}数学{1}，考查「{2}」，难度 {3}/5（{4}），用于{5}。": "Make one {0} math question ({1}) on “{2}”, difficulty {3}/5 ({4}), for {5}.",
+  "请出一道{0}数学{1}，难度 {2}/5（{3}），用于{4}。": "Make one {0} math question ({1}), difficulty {2}/5 ({3}), for {4}.",
+  "请出 {0} 道{1}数学{2}，考查「{3}」，难度 {4}/5（{5}），用于{6}。": "Make {0} {1} math questions ({2}) on “{3}”, difficulty {4}/5 ({5}), for {6}.",
+  "请出 {0} 道{1}数学{2}，难度 {3}/5（{4}），用于{5}。": "Make {0} {1} math questions ({2}), difficulty {3}/5 ({4}), for {5}.",
+  "请出一道{0}数学{1}{2}，难度 {3}/5（{4}），用于{5}。": "Make one {0} math question ({1}){2}, difficulty {3}/5 ({4}), for {5}.",
+  "，考查「{0}」": " on “{0}”",
+  "{0}{1}右键：重命名、置顶、删除": "{0}{1}Right-click: Rename, Pin, Delete",
+  "Tetra 命题智能体": "Tetra · Math Question Agent"
+}

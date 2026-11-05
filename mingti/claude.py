@@ -85,7 +85,9 @@ class ClaudeJsonClient(DeepSeekJsonClient):
             "max_tokens": max_tokens,
             "system": system,
             "messages": [_to_claude(message) for message in messages],
-            "output_config": {"effort": "max" if thinking == "max" else "high" if thinking else "low"},
+            "output_config": {
+                "effort": "max" if thinking == "max" else "medium" if thinking == "light" else "high" if thinking else "low"
+            },
         }
         learned = self._learned.setdefault((self.base_url, self.model), {})
         if learned.get("output_config") == "drop":

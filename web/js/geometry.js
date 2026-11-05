@@ -111,13 +111,13 @@ function drawSolid(item) {
   };
   ctx.lineWidth = 1.1;
   ctx.setLineDash([4, 4]);
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.13)';
+  ctx.strokeStyle = `rgba(${ink}, 0.13)`;
   for (const edge of solid.edges) if (!edge.faces.some((f) => facing[f])) line(edge);
   ctx.setLineDash([]);
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+  ctx.strokeStyle = `rgba(${ink}, 0.3)`;
   for (const edge of solid.edges) if (edge.faces.some((f) => facing[f])) line(edge);
 
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.32)';
+  ctx.fillStyle = `rgba(${ink}, 0.32)`;
   const seen = new Set();
   solid.faces.forEach((face, f) => { if (facing[f]) face.forEach((i) => seen.add(i)); });
   for (const i of seen) {
@@ -127,7 +127,11 @@ function drawSolid(item) {
   }
 }
 
+// 线条的颜色跟着主题走：白天是黑线，夜晚是白线（app.css 里的 --geo-rgb）
+let ink = '0, 0, 0';
+
 function draw() {
+  ink = getComputedStyle(document.documentElement).getPropertyValue('--geo-rgb').trim() || '0, 0, 0';
   ctx.clearRect(0, 0, width, height);
   ctx.lineCap = 'round';
   LAYOUT.forEach((item, i) => {

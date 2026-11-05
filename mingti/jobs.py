@@ -326,7 +326,7 @@ class JobManager:
             "mode": mode,
             "lanes": lanes,
             "verify": bool(raw.get("verify")),
-            "thinking": raw.get("thinking") if raw.get("thinking") in THINK_LEVELS else "high",
+            "thinking": raw.get("thinking") if raw.get("thinking") in THINK_LEVELS else "medium",
             "model": roles["composer"],
             "roles": roles,
         }

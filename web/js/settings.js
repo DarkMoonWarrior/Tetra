@@ -6,9 +6,12 @@ import {
   $, DETAIL, DIFFICULTY_LABEL, MODES, PURPOSES, THINKING, TYPE_LABEL, el, formatWhen, modelName, request, segmented,
   strongModel, svg, toast,
 } from './shared.js';
+import { applyTheme } from './theme.js';
+import { setLanguage } from './i18n.js';
 
 const SECTIONS = [
   { id: 'profile', name: '个人资料', icon: 'user' },
+  { id: 'appearance', name: '外观与语言', icon: 'palette' },
   { id: 'defaults', name: '出题偏好', icon: 'sliders' },
   { id: 'models', name: '模型服务', icon: 'server' },
   { id: 'agent', name: '出题方式与模型', icon: 'layers' },
@@ -19,9 +22,12 @@ const SECTIONS = [
 // 读不到服务端设置时按这个来，和后端 Profile 的默认值一致
 const FALLBACK = {
   display_name: '',
+  avatar: '',
   grade: '',
+  theme: 'light',
+  language: 'zh',
   defaults: { question_type: 'single_choice', difficulty: 3, purpose: '课堂练习', solution_detail: 'standard', standing_request: '' },
-  agent: { mode: 'fast', thinking: 'high', model: null, lanes: 1, verify: false, check_model: null },
+  agent: { mode: 'fast', thinking: 'medium', model: null, lanes: 1, verify: false, check_model: null },
   learning: { enabled: false, feedback: [] },
   updated_at: null,
 };
@@ -42,6 +48,10 @@ function apply(view, changed) {
   store.profile = view.profile;
   store.proposals = view.proposals || [];
   store.resetPhrase = view.reset_phrase || store.resetPhrase;
+  // 主题按个人设置来（本机存的那份只用来在页面刚打开时上色）
+  applyTheme(view.profile.theme || 'light');
+  // 语言：个人设置和本机存的不一样（比如在别的浏览器里改过），按个人设置刷新一次
+  if (setLanguage(view.profile.language || 'zh')) window.location.reload();
   for (const listener of store.listeners) listener(store.profile, changed);
   refreshAccount();
   renderTabs();
@@ -99,10 +109,53 @@ function valueText(key, value) {
   return String(value);
 }
 
-function avatarFill(node, name) {
+// 头像：上传过图片就显示图片，没有就显示称呼的第一个字（没有称呼显示一个人形图标）
+function avatarFill(node, name, image = '') {
+  node.classList.toggle('has-image', Boolean(image));
+  if (image) {
+    const img = el('img');
+    img.src = image;
+    img.alt = '';
+    node.replaceChildren(img);
+    return;
+  }
   const first = [...String(name || '').trim()][0];
   if (first) node.textContent = first;
   else node.innerHTML = svg('user');
+}
+
+// 上传的图片 → 居中裁成正方形、缩到 256×256 → data URL（支持透明的用 WebP，不支持就用 PNG）
+const AVATAR_SIZE = 256;
+function avatarFromFile(file) {
+  return new Promise((resolve, reject) => {
+    if (!/^image\//.test(file.type)) {
+      reject(new Error('请选一张图片（PNG、JPG、WebP 或 GIF）'));
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      reject(new Error('图片太大了，选一张 15 MB 以内的'));
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      const side = Math.min(image.naturalWidth, image.naturalHeight);
+      const canvas = document.createElement('canvas');
+      canvas.width = AVATAR_SIZE;
+      canvas.height = AVATAR_SIZE;
+      const draw = canvas.getContext('2d');
+      draw.imageSmoothingQuality = 'high';
+      draw.drawImage(image, (image.naturalWidth - side) / 2, (image.naturalHeight - side) / 2, side, side, 0, 0, AVATAR_SIZE, AVATAR_SIZE);
+      URL.revokeObjectURL(url);
+      const webp = canvas.toDataURL('image/webp', 0.88);
+      resolve(webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/png'));
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('这张图片打不开，换一张试试'));
+    };
+    image.src = url;
+  });
 }
 
 // ---------- 左下角按钮和菜单 ----------
@@ -111,7 +164,7 @@ export function refreshAccount() {
   const p = profile();
   const health = ctx.health();
   const avatar = $('#accountAvatar');
-  avatarFill(avatar, p.display_name);
+  avatarFill(avatar, p.display_name, p.avatar);
   avatar.classList.toggle('offline', !health.ok);
   $('#accountName').textContent = p.display_name || '个人设置';
   $('#accountNote').textContent = !health.ok
@@ -128,7 +181,7 @@ function renderMenu() {
   const card = el('div', 'account-card');
   const avatar = el('span', 'avatar');
   avatar.setAttribute('aria-hidden', 'true');
-  avatarFill(avatar, p.display_name);
+  avatarFill(avatar, p.display_name, p.avatar);
   // 菜单只放名字，不放说明小字
   const who = el('div');
   who.append(el('b', '', p.display_name || '个人设置'));
@@ -286,6 +339,47 @@ function modelSelect(id, current, onPick) {
   return select;
 }
 
+// 头像：预览 + 上传 + 去掉。图片只存在这台电脑的个人设置里
+function avatarField() {
+  const p = profile();
+  const row = el('div', 'avatar-field');
+  const preview = el('span', 'avatar avatar-preview');
+  preview.setAttribute('aria-hidden', 'true');
+  const input = el('input');
+  input.type = 'file';
+  input.accept = 'image/png,image/jpeg,image/webp,image/gif';
+  input.hidden = true;
+  const upload = button(p.avatar ? '换一张' : '上传头像', 'btn', () => input.click());
+  const remove = button('去掉头像', 'link-btn', async () => {
+    remove.disabled = true;
+    if (await save({ avatar: '' }, ['avatar'], '已去掉头像')) show();
+    remove.disabled = false;
+  });
+  const show = () => {
+    const current = profile();
+    avatarFill(preview, current.display_name, current.avatar);
+    upload.textContent = current.avatar ? '换一张' : '上传头像';
+    remove.hidden = !current.avatar;
+  };
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    upload.disabled = true;
+    try {
+      const image = await avatarFromFile(file);
+      if (await save({ avatar: image }, ['avatar'], '已换上新头像')) show();
+    } catch (error) {
+      setStatus(error.message, true);
+    } finally {
+      upload.disabled = false;
+    }
+  });
+  show();
+  row.append(preview, upload, remove, input);
+  return field('头像', '显示在左下角和设置菜单里。图片会居中裁成正方形，只保存在这台电脑上。', row);
+}
+
 function profileSection() {
   const p = profile();
   const wrap = el('div');
@@ -298,7 +392,8 @@ function profileSection() {
   name.addEventListener('input', () => saveLater({ display_name: name.value }, ['display_name']));
   name.addEventListener('change', flush);
   wrap.append(
-    field('称呼', '首页会用它跟你打招呼。', name, 'settingName'),
+    avatarField(),
+    field('称呼', '首页会用它跟你打招呼；没上传头像时，头像显示称呼的第一个字。', name, 'settingName'),
     field(
       '任教年级',
       '出题时默认按这个年级；选了别的年级的考点，也可以在输入框里临时改。',
@@ -330,7 +425,7 @@ function defaultsSection() {
     return save({ defaults: { ...d } }, ['defaults']);
   };
   const wrap = el('div');
-  wrap.append(el('p', 'settings-intro', '每次打开时，输入框按这里预先选好；出题时也可以临时改。'));
+  wrap.append(el('p', 'settings-intro', '输入框下方的题型、难度、用途没选时，出题就按这里的默认；在输入框下方选了的只管那一次，出完恢复成没选。'));
   const request_ = el('textarea', 'text-input');
   request_.id = 'settingRequest';
   request_.maxLength = 300;
@@ -392,8 +487,8 @@ function agentSection() {
     field('默认出题方式', '每道题都按这里选的方式出。', choices(options, a.mode, (value) => push({ mode: value }), '默认出题方式')),
     field(
       '默认思考强度',
-      '点输入框右下角的模型名可以临时调。较难和压轴题（4、5 星）至少用高。',
-      choices(Object.entries(THINKING).map(([value, item]) => ({ value, name: item.name, note: item.note })), a.thinking || 'high', (value) => push({ thinking: value }), '默认思考强度'),
+      '出题和聊天回答都按这一档；点输入框右下角的模型名可以临时调。较难和压轴题（4、5 星）至少用高。',
+      choices(Object.entries(THINKING).map(([value, item]) => ({ value, name: item.name, note: item.note })), a.thinking || 'medium', (value) => push({ thinking: value }), '默认思考强度'),
     ),
     field('主模型', '命题员和解题员用它；选「快速出题」时，所有角色都用它。', modelSelect('settingMainModel', main, (value) => push({ model: value })), 'settingMainModel'),
     field('自定义方式', '选了「自定义」，才会按下面这几项出题。', custom),
@@ -833,7 +928,7 @@ function dataSection() {
   row.append(input, remove);
   zone.append(
     el('b', '', '删除全部偏好'),
-    el('p', '', '清除称呼、出题偏好、出题方式和偏好学习的全部记录，恢复成默认设置。出题记录不受影响。删除后不能恢复。'),
+    el('p', '', '清除称呼、头像、出题偏好、出题方式和偏好学习的全部记录，恢复成默认设置。出题记录不受影响。删除后不能恢复。'),
     row,
   );
 
@@ -845,8 +940,47 @@ function dataSection() {
   return wrap;
 }
 
+// 外观与语言：主题马上生效；语言要刷新一下页面（界面文字按新语言重新排）
+function appearanceSection() {
+  const p = profile();
+  const wrap = el('div');
+  wrap.append(
+    field(
+      '主题',
+      '白天是浅色界面，夜晚是深色界面；选"跟随系统"就和这台电脑的深浅色设置一致。',
+      segmented(
+        [{ value: 'light', label: '白天' }, { value: 'dark', label: '夜晚' }, { value: 'system', label: '跟随系统' }],
+        p.theme || 'light',
+        (value) => {
+          applyTheme(value);
+          save({ theme: value }, ['theme'], '已切换主题');
+        },
+        '主题',
+      ),
+    ),
+    field(
+      '语言',
+      '界面上的文字用哪种语言（Interface language）。题目、解析这些内容不翻译；切换后页面会刷新一下。',
+      segmented(
+        [{ value: 'zh', label: '中文' }, { value: 'en', label: 'English' }],
+        p.language || 'zh',
+        async (value) => {
+          if (value === (profile().language || 'zh')) return;
+          if (await save({ language: value }, ['language'], value === 'en' ? 'Switched to English' : '已切换成中文')) {
+            setLanguage(value);
+            window.location.reload();
+          }
+        },
+        '语言',
+      ),
+    ),
+  );
+  return wrap;
+}
+
 const BUILDERS = {
   profile: profileSection,
+  appearance: appearanceSection,
   defaults: defaultsSection,
   models: modelsSection,
   agent: agentSection,

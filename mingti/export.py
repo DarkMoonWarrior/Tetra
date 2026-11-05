@@ -184,9 +184,14 @@ def _text(value: str) -> str:
     return f'<span class="tx">{html.escape(_glue_punctuation(value or ""))}</span>'
 
 
-def print_html(paper: dict, *, answers: bool, auto_print: bool = False, part: str = "all") -> str:
+# 夜晚主题下预览页纸张四周的底色（窄屏时纸铺满整页，不用改）
+DARK_FRAME = "<style>@media screen and (min-width: 861px) { html { background: #262626; } }</style>"
+
+
+def print_html(paper: dict, *, answers: bool, auto_print: bool = False, part: str = "all", dark: bool = False) -> str:
+    """dark：界面是夜晚主题时，预览里纸张四周的底色换成深灰（纸还是白的，打印和导出不受影响）。"""
     if paper.get("style") == "standard":
-        return standard_html(paper, part=part, answers=answers, auto_print=auto_print)
+        return standard_html(paper, part=part, answers=answers, auto_print=auto_print, dark=dark)
     sections = layout(paper)
     total = sum(section["total"] for section in sections)
     out = [f"<h1>{html.escape(paper['title'])}</h1>"]
@@ -238,7 +243,7 @@ def print_html(paper: dict, *, answers: bool, auto_print: bool = False, part: st
 <meta charset="utf-8">
 <title>{html.escape(paper['title'])}</title>
 <link rel="stylesheet" href="/vendor/katex/katex.min.css">
-<style>{PRINT_CSS}</style>
+<style>{PRINT_CSS}</style>{DARK_FRAME if dark else ""}
 </head>
 <body>
 <main class="sheet">{''.join(out)}</main>
@@ -529,7 +534,7 @@ def _standard_answers(paper: dict, sections: list[dict], *, after: bool) -> str:
     return f'<section class="answers{" after" if after else ""}">{"".join(out)}</section>'
 
 
-def standard_html(paper: dict, *, part: str = "all", answers: bool = True, auto_print: bool = False) -> str:
+def standard_html(paper: dict, *, part: str = "all", answers: bool = True, auto_print: bool = False, dark: bool = False) -> str:
     """part：exam 只要试题，answers 只要答案（导出 PDF 时分开印，各自从第 1 页编页码），all 两份连着（预览、打印）。"""
     sections = standard_layout(paper)
     body = []
@@ -545,7 +550,7 @@ def standard_html(paper: dict, *, part: str = "all", answers: bool = True, auto_
 <meta charset="utf-8">
 <title>{title}</title>
 <link rel="stylesheet" href="/vendor/katex/katex.min.css">
-<style>{STANDARD_CSS}</style>
+<style>{STANDARD_CSS}</style>{DARK_FRAME if dark else ""}
 </head>
 <body>
 {''.join(body)}
