@@ -34,6 +34,7 @@ from mingti.question_authoring.providers import (
     _QuestionInvalidAfterSolution,
     _QuestionNeedsHighSchoolRework,
     _SolutionInvalidAfterReview,
+    _SolutionSectionFailed,
 )
 from mingti.question_authoring.schemas import ProviderQuestionDraft
 from mingti.tracking import StopRequested
@@ -154,9 +155,17 @@ class LaneProvider(DeepSeekQuestionAuthoringProvider):
         )
 
     def _report_solution_rejected(self, rejection):
+        if isinstance(rejection, _SolutionSectionFailed):
+            # 解题员自己某一段没写成（输出格式不对之类）：内部重写，不算退回
+            self.hooks.event(self.lane, "solver", "note", f"{rejection.summary}，重新写一份解析", rejection.issues)
+            return
         # 超纲的退回：摘要里已经写了复核员的判断和交给谁（见 _check_solution_scope）
         text = rejection.summary if rejection.scope else f"解析没通过复核，退回解题员：{rejection.summary}"
         self.hooks.event(self.lane, "auditor", "reject", text, rejection.issues)
+
+    def _report_acceptance(self, problems, *, to_composer):
+        who = "退回命题员修改" if to_composer else "让解题员重写解析"
+        self.hooks.event(self.lane, "check", "reject", f"交付前的检查没通过，{who}", problems)
 
     def _report_solution_repaired(self, round_no, changed, disputed, objection=""):
         if changed:

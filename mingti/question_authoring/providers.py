@@ -217,6 +217,14 @@ class _SolutionInvalidAfterReview(QuestionAuthoringProviderError):
         super().__init__("解析与题面不一致，必须保留题面并重新生成解析。")
 
 
+class _SolutionSectionFailed(_SolutionInvalidAfterReview):
+    """写解析时某一段试了几次都没写成（返回的内容读不了、写进了思考过程）。这是解题员自己输出的问题，
+    不是题的问题：整份重写解析（带着原因），不能因此让整个任务失败。"""
+
+    def __init__(self, *, summary: str, issues: list[str]) -> None:
+        super().__init__(summary=summary, issues=issues)
+
+
 class _ContentCandidateRejected(QuestionAuthoringProviderError):
     """One complete candidate failed quality recovery and must be replaced.
 
@@ -261,6 +269,14 @@ class QuestionAuthoringContext:
         repr=False,
     )
     on_statement_approved: Callable[[QuestionAuthoringStatementPreview], None] | None = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
+    # 交付前最后一关的检查（结构、可信检查、范围），不抛异常，返回 [(谁来改, 问题)]，"statement" 是命题员、
+    # "solution" 是解题员。由 QuestionAuthoring 提供：出题流程在交出一道题之前先跑一遍，有问题就退回对应的角色，
+    # 不会等题交出去以后才让整个任务失败
+    acceptance: Callable[[ProviderQuestionDraft], list[tuple[str, str]]] | None = field(
         default=None,
         compare=False,
         repr=False,
@@ -525,6 +541,7 @@ class DeepSeekQuestionAuthoringProvider:
                 provider_input,
                 on_repair=lambda: context.report_progress("refining"),
             )
+            core, question_review = self._fix_statement_format(core, question_review, provider_input, context.question_type)
             core, question_review = self._check_planned_answer(
                 core,
                 question_review,
@@ -554,6 +571,10 @@ class DeepSeekQuestionAuthoringProvider:
                         on_review=lambda: context.report_progress("reviewing_solution"),
                         earlier_problems=solution_problems,
                     )
+                    draft = self._draft_from(context, core, plan, steps, conclusion)
+                    # 交出去之前先过一遍最后一关的检查：题面的问题退回命题员，解析的问题让解题员重写，
+                    # 不会等题交出去以后才让整个任务失败
+                    self._check_acceptance(context, draft)
                 except _QuestionInvalidAfterSolution as exc:
                     if not isinstance(exc, _QuestionNeedsHighSchoolRework):
                         # 题面本身不成立，这个题面上的解析不能交付。只是要改成高中方法能解的题时不一样：
@@ -624,7 +645,7 @@ class DeepSeekQuestionAuthoringProvider:
                         context.report_progress("regenerating_solution")
                     continue
 
-                return self._draft_from(context, core, plan, steps, conclusion)
+                return draft
         except QuestionAuthoringProviderError:
             raise
         except (DeepSeekJsonResponseError, KeyError, TypeError, ValueError) as exc:
@@ -674,8 +695,7 @@ class DeepSeekQuestionAuthoringProvider:
                 recovery_instruction="只修复 JSON 结构；保留覆盖全部小问所需的解析分段。",
             )
         )
-        self._validate_plan_orders(plan)
-        plan = self._clean_plan_labels(plan)
+        plan = self._clean_plan_labels(self._normalized_plan(plan))
         sections = self._expand_sections(core, plan, stage_suffix=stage_suffix)
         steps = [step for section in sections for step in section.steps if step.strip()]  # 模型偶尔多写一个空步骤，丢掉即可
 
@@ -860,20 +880,78 @@ class DeepSeekQuestionAuthoringProvider:
         """返工到上限时交付的那一版：答案没有分歧的优先，其次意见最少；一样好时取最新的。
         要写明还有哪些意见没解决，老师才知道该核对什么。"""
         candidates = self.__dict__.get("_candidates") or []
-        if not candidates:
-            return None
-        best = min(reversed(candidates), key=lambda item: (item.answer_disputed, len(item.issues)))
-        note = "；".join(best.issues[:3]) or best.summary
-        if best.answer_disputed:
-            note = f"答案和复核员算的不一致：{note}"
-        return self._draft_from(
-            self.__dict__.get("_candidate_context"),
-            best.core,
-            best.plan,
-            list(best.steps),
-            best.conclusion,
-            issue=note[:480],
+        context = self.__dict__.get("_candidate_context")
+        check = getattr(context, "acceptance", None)
+        # 一样好时取最新的；过不了交付前最后一关检查的那几版不交（交出去也会被拦下，任务照样失败）
+        for best in sorted(reversed(candidates), key=lambda item: (item.answer_disputed, len(item.issues))):
+            note = "；".join(best.issues[:3]) or best.summary
+            if best.answer_disputed:
+                note = f"答案和复核员算的不一致：{note}"
+            draft = self._draft_from(context, best.core, best.plan, list(best.steps), best.conclusion, issue=note[:480])
+            if check is None or not check(draft):
+                return draft
+        return None
+
+    _TYPE_NAMES = {"single_choice": "单选题", "multiple_choice": "多选题", "fill_blank": "填空题", "open_response": "解答题"}
+
+    @classmethod
+    def _statement_format_problems(cls, core: _QuestionStatement, expected: str) -> list[str]:
+        """题面的格式和题型对不对得上（只看结构，不看数学）：题型、选择题的四个选项。"""
+        problems = []
+        if core.question_type != expected:
+            problems.append(
+                f"要出的是{cls._TYPE_NAMES.get(expected, expected)}，这一版写成了{cls._TYPE_NAMES.get(core.question_type, core.question_type)}"
+            )
+        if expected in ("single_choice", "multiple_choice"):
+            keys = [option.key.strip().upper() for option in core.options]
+            texts = [re.sub(r"[\s$]", "", option.text) for option in core.options]
+            if len(core.options) < 4:
+                problems.append(f"选择题要给出 A、B、C、D 四个选项，这一版只有 {len(core.options)} 个")
+            if len(set(keys)) != len(keys):
+                problems.append("选项编号有重复")
+            if any(not text for text in texts) or len(set(texts)) != len(texts):
+                problems.append("选项内容不能为空，也不能有两个选项完全相同")
+        return problems
+
+    def _fix_statement_format(
+        self,
+        core: _QuestionStatement,
+        question_review: _QuestionReview,
+        provider_input: dict,
+        expected: str,
+    ) -> tuple[_QuestionStatement, _QuestionReview]:
+        """写解析之前先把题面的格式理顺：非选择题多给的选项直接去掉；题型不对、选择题选项不全或重复，
+        退回命题员按具体问题改（改完审题员再审）。以前这类问题要到最后的结构检查才发现，整个任务失败。"""
+        if expected not in ("single_choice", "multiple_choice") and core.question_type == expected and core.options:
+            core = core.model_copy(update={"options": []})
+        problems = self._statement_format_problems(core, expected)
+        if not problems:
+            return core, question_review
+        return self._repair_question_from_issues(
+            core,
+            provider_input,
+            review_summary="题面的格式和题型要求对不上",
+            review_issues=problems,
+            stage_prefix="core-format-repair",
+            attempts=2,
         )
+
+    def _check_acceptance(self, context: QuestionAuthoringContext | None, draft: ProviderQuestionDraft) -> None:
+        """交出去之前过一遍最后一关的检查（context.acceptance，和 QuestionAuthoring 交付时的检查是同一套）。
+        题面的问题退回命题员改（_QuestionInvalidAfterSolution），解析和答案的问题让解题员重写（_SolutionInvalidAfterReview）。"""
+        check = getattr(context, "acceptance", None)
+        problems = check(draft) if check is not None else []
+        if not problems:
+            return
+        statement = [text for kind, text in problems if kind == "statement"]
+        solution = [text for kind, text in problems if kind != "statement"]
+        self._report_acceptance(statement or solution, to_composer=bool(statement))
+        if statement:
+            raise _QuestionInvalidAfterSolution(summary="交付前的检查发现题面不合要求", issues=[*statement, *solution])
+        raise _SolutionInvalidAfterReview(summary="交付前的检查发现解析或答案不完整", issues=solution)
+
+    def _report_acceptance(self, problems: list[str], *, to_composer: bool) -> None:
+        """交付前的检查退回了这一版；多智能体版本把它记进过程记录。"""
 
     def _draft_from(
         self,
@@ -947,7 +1025,7 @@ class DeepSeekQuestionAuthoringProvider:
                         recovery_instruction="只修复 JSON 结构；保留覆盖全部小问所需的解析分段。",
                     )
                 )
-                self._validate_plan_orders(plan)
+                plan = self._normalized_plan(plan)
                 try:
                     sections = self._expand_sections(core, plan, stage_suffix=suffix)
                     steps = [step for section in sections for step in section.steps if step.strip()]  # 模型偶尔多写一个空步骤，丢掉即可
@@ -1012,8 +1090,8 @@ class DeepSeekQuestionAuthoringProvider:
             )
         sections.sort(key=lambda item: item.order)
         expected = list(range(1, len(plan.sections) + 1))
-        if [item.order for item in sections] != expected:
-            raise QuestionAuthoringProviderError("分段解析序号不完整，未组装为草稿")
+        if [item.order for item in sections] != expected:  # 段号由程序定，正常不会出现；万一出现就整份重写，不让任务失败
+            raise _SolutionSectionFailed(summary="解析各段没能拼成完整的一份", issues=["分段解析序号不完整"])
         return sections
 
     def _expand_solution_section(
@@ -1048,14 +1126,13 @@ class DeepSeekQuestionAuthoringProvider:
                 input_value=input_value,
                 instructions=instructions,
             )
-        except (_QuestionInvalidAfterSolution, _SolutionInvalidAfterReview):
-            raise
-        except QuestionAuthoringProviderError as original_error:
+        except _SolutionSectionFailed as failure:
+            # 多半是这一段太长、输出被截断或写乱了：拆成几个小段再写；还不行由外层整份重写解析
             return self._subdivide_and_expand(
                 core=core,
                 plan=plan,
                 section=section,
-                original_error=original_error,
+                original_error=failure,
             )
 
     def _request_solution_section(
@@ -1066,7 +1143,10 @@ class DeepSeekQuestionAuthoringProvider:
         input_value: dict,
         instructions: str,
     ) -> _SolutionSection:
-        last_error: DeepSeekClientError | ValueError | None = None
+        """写一段解析。模型回复里的段号只是重复了一遍要写哪一段，程序知道是第几段，不一致就按要写的那段算，
+        不当成错误（以前段号写错一个数字，整个任务就失败了）。返回的内容读不了、清理后还有思考过程，重试一次；
+        还不行抛 _SolutionSectionFailed，由外层拆小段或整份重写，不让任务失败。接口出错（网络、余额）照常往外抛。"""
+        last_error: Exception | None = None
         for attempt in range(2):
             try:
                 payload = self._request_stage(
@@ -1077,11 +1157,7 @@ class DeepSeekQuestionAuthoringProvider:
                     max_tokens=8192,
                     recovery_instruction="只修复当前解析段的 JSON；完整保留该段推导，不要返回其他段。",
                 )
-                parsed = _SolutionSection.model_validate(payload)
-                if parsed.order != section.order:
-                    raise ValueError(
-                        f"解析段序号应为 {section.order}，实际为 {parsed.order}"
-                    )
+                parsed = _SolutionSection.model_validate({**payload, "order": section.order})
                 if self._contains_deliberation(parsed.steps):
                     parsed = self._cleanup_solution_section(
                         section=section,
@@ -1089,12 +1165,11 @@ class DeepSeekQuestionAuthoringProvider:
                         contaminated=parsed,
                     )
                 return parsed
-            except (DeepSeekClientError, ValueError) as exc:
+            except (DeepSeekJsonResponseError, KeyError, TypeError, ValueError) as exc:
                 last_error = exc
-                if attempt == 0:
-                    continue
-        raise QuestionAuthoringProviderError(
-            f"第 {section.order} 段解析生成失败：{last_error}"
+        raise _SolutionSectionFailed(
+            summary=f"第 {section.order} 段解析试了两次都没写成",
+            issues=[f"第 {section.order} 段（{section.title}）：{str(last_error)[:200]}"],
         )
 
     def _cleanup_solution_section(
@@ -1124,11 +1199,8 @@ class DeepSeekQuestionAuthoringProvider:
             max_tokens=8192,
             recovery_instruction="只修复清理后解析的 JSON，不得恢复思考过程。",
         )
-        cleaned = _SolutionCleanup.model_validate(payload)
-        if cleaned.order != section.order:
-            raise ValueError(
-                f"清理后解析段序号应为 {section.order}，实际为 {cleaned.order}"
-            )
+        # 段号只是重复一遍是哪一段，以要清理的这一段为准（模型写错段号以前会让整个任务失败）
+        cleaned = _SolutionCleanup.model_validate({**payload, "order": section.order})
         if not cleaned.mathematically_valid:
             issue = (cleaned.issue_summary or "题面或当前解析在数学上不成立").strip()
             if self._contains_deliberation([issue]):
@@ -1144,7 +1216,7 @@ class DeepSeekQuestionAuthoringProvider:
             )
         if self._contains_deliberation(cleaned.steps):
             raise ValueError("清理后的解析仍包含模型思考或自我纠错叙述")
-        return _SolutionSection(order=cleaned.order, steps=cleaned.steps)
+        return _SolutionSection(order=section.order, steps=cleaned.steps)
 
     @staticmethod
     def _contains_deliberation(steps: list[str]) -> bool:
@@ -1162,6 +1234,8 @@ class DeepSeekQuestionAuthoringProvider:
         section: _SolutionPlanSection,
         original_error: QuestionAuthoringProviderError,
     ) -> _SolutionSection:
+        """一段解析写不成时拆成几个小段分别写。拆了还不行抛 _SolutionSectionFailed，由外层整份重写解析；
+        子段编号写乱了就按顺序重新编号，不当成错误。接口出错照常往外抛。"""
         try:
             subplan = _SolutionSubplan.model_validate(
                 self._request_stage(
@@ -1181,9 +1255,10 @@ class DeepSeekQuestionAuthoringProvider:
                     recovery_instruction="只修复子段提纲 JSON；保留全部连续子段。",
                 )
             )
-            orders = [part.order for part in subplan.parts]
-            if orders != list(range(1, len(orders) + 1)):
-                raise ValueError("解析子段序号必须从 1 连续递增且不可重复")
+            parts = [
+                part.model_copy(update={"order": index})
+                for index, part in enumerate(sorted(subplan.parts, key=lambda item: item.order), 1)
+            ]
 
             def expand_part(part: _SolutionPlanSection) -> _SolutionSection:
                 return self._request_solution_section(
@@ -1207,16 +1282,20 @@ class DeepSeekQuestionAuthoringProvider:
                     ),
                 )
 
-            with ThreadPoolExecutor(max_workers=min(3, len(subplan.parts))) as executor:
-                expanded = list(executor.map(expand_part, subplan.parts))
+            with ThreadPoolExecutor(max_workers=min(3, len(parts))) as executor:
+                expanded = list(executor.map(expand_part, parts))
             expanded.sort(key=lambda item: item.order)
             steps = [step for part in expanded for step in part.steps]
             return _SolutionSection(order=section.order, steps=steps)
-        except QuestionAuthoringProviderError:
-            raise
-        except (DeepSeekClientError, KeyError, TypeError, ValueError) as exc:
-            raise QuestionAuthoringProviderError(
-                f"第 {section.order} 段拆分恢复失败（原错误：{original_error}）：{exc}"
+        except _SolutionSectionFailed as exc:
+            raise _SolutionSectionFailed(
+                summary=f"第 {section.order} 段解析拆成小段也没写成",
+                issues=[*getattr(original_error, "issues", [str(original_error)])[:1], *exc.issues[:1]],
+            ) from exc
+        except (DeepSeekJsonResponseError, KeyError, TypeError, ValueError) as exc:
+            raise _SolutionSectionFailed(
+                summary=f"第 {section.order} 段解析拆成小段也没写成",
+                issues=[*getattr(original_error, "issues", [str(original_error)])[:1], f"拆分时：{str(exc)[:200]}"],
             ) from exc
 
     def _request_stage(
@@ -1876,6 +1955,12 @@ class DeepSeekQuestionAuthoringProvider:
         新的一份仍然是独立求解，两次结果一致才算数（见 _verify_completed_solution）。"""
         if rejection.needs_fresh_solve:
             return ["上一份解析得出的答案和审题员独立求得的不一致，还不知道哪边对。这一份请从题面独立重新求解，关键结果逐个验算。"]
+        if isinstance(rejection, _SolutionSectionFailed):
+            return [
+                f"上一份解析没写完整：{rejection.summary}"[:500],
+                *(issue[:500] for issue in rejection.issues[:2]),
+                "这一份把长的推导分成更短的几段；每段只写正式的推导，不要写试算和自我纠正。",
+            ]
         notes = [f"上一份解析没有通过复核：{rejection.summary}"[:500], *(issue[:500] for issue in rejection.issues[:4])]
         if rejection.scope:
             notes.append("上一份用了高中课程以外的方法或说法，这一份从规划开始就只用高中方法。")
@@ -2050,12 +2135,13 @@ class DeepSeekQuestionAuthoringProvider:
         }
 
     @staticmethod
-    def _validate_plan_orders(
-        plan: _SolutionPlan | _SolutionRegenerationPlan,
-    ) -> None:
-        orders = [item.order for item in plan.sections]
-        if orders != list(range(1, len(orders) + 1)):
-            raise ValueError("解析提纲序号必须从 1 连续递增且不可重复")
+    def _normalized_plan(plan):
+        """解析提纲的段号按出现的先后重新编成 1、2、3……。段号只是标记顺序，模型写重、写跳了不算错，
+        以前这里会直接报错，整份解析作废。"""
+        sections = sorted(plan.sections, key=lambda item: item.order)
+        return plan.model_copy(
+            update={"sections": [item.model_copy(update={"order": index}) for index, item in enumerate(sections, 1)]}
+        )
 
     @staticmethod
     def _extract_output_text(payload: dict) -> str:

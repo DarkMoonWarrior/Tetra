@@ -447,6 +447,7 @@ export function describeStage(stage) {
   else if (s === 'question-review') text = '审查题干的条件、范围与表述';
   else if (/-review-check(?:-\d+)?$/.test(s)) text = '复查修改后的题干';
   else if (s.startsWith('core-question-repair')) { text = '按审题意见修改题干'; repair = true; }
+  else if (s.startsWith('core-format-repair')) { text = '按题型要求补齐题干和选项'; repair = true; }
   else if (s.startsWith('answer-gate-repair')) { text = '按答案核对结果修改题干'; repair = true; }
   else if (s === 'answer-gate-equivalence') text = '核对命题构造和审题员的答案';
   else if (s.startsWith('post-solution-question-repair')) { text = '根据解题中发现的问题修改题干'; repair = true; }

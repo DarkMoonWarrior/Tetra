@@ -83,6 +83,7 @@ class QuestionAuthoring:
                     curriculum_options=curriculum_options,
                     on_progress=on_progress,
                     on_statement_approved=on_statement_approved,
+                    acceptance=lambda draft: self._acceptance_problems(draft, expected_type=question_type, brief=brief),
                 )
             )
         except QuestionAuthoringProviderError as exc:
@@ -696,6 +697,49 @@ class QuestionAuthoring:
             raise QuestionAuthoringError(
                 "生成内容超出高中数学范围：" + "、".join(violations)
             )
+
+    # 下面这几条结构问题出在题面（命题员改），其余出在解析或答案（解题员重写）
+    _STATEMENT_STRUCTURE_ERRORS = frozenset(
+        {"模型返回的题型与教师要求不一致", "模型返回了重复选项编号", "选择题必须至少提供四个可读选项", "非选择题不应返回选项"}
+    )
+    _PLACEHOLDERS = ("TODO", "TBD", "待补充", "请补充条件", "条件待定")
+
+    def _acceptance_problems(
+        self,
+        content: ProviderQuestionDraft,
+        *,
+        expected_type: QuestionType,
+        brief: QuestionDesignBrief,
+    ) -> list[tuple[str, str]]:
+        """交付时的全部检查（结构、高中范围、可信检查），换成不抛异常的版本，返回 [(谁来改, 问题)]：
+        "statement" 由命题员改题面，"solution" 由解题员重写解析。出题流程在交出一道题之前先跑一遍
+        （QuestionAuthoringContext.acceptance），有问题就退回对应的角色，所以 generate 最后的检查正常不会再拦下。"""
+        problems: list[tuple[str, str]] = []
+        content = self._canonicalize_generated_content(content)
+        try:
+            self._validate_structure(content, expected_type=expected_type)
+        except QuestionAuthoringError as exc:
+            message = str(exc)
+            problems.append(("statement" if message in self._STATEMENT_STRUCTURE_ERRORS else "solution", message))
+        try:
+            self._validate_high_school_scope(content)
+        except QuestionAuthoringError as exc:
+            stem_parts = (content.stem_plain, content.stem_latex or "", *(option.text for option in content.options))
+            problems.append(("statement" if scope_violations(*stem_parts) else "solution", str(exc)))
+        verification = self._evaluate_trust(content, brief=brief, draft_id="acceptance-check")
+        for check in verification.checks:
+            if check.status != "failed":
+                continue
+            if check.code == "distractor_quality":
+                kind = "statement"
+            elif check.code == "solvability":
+                stem = f"{content.stem_plain} {content.stem_latex or ''}".lower()
+                kind = "statement" if any(marker.lower() in stem for marker in self._PLACEHOLDERS) else "solution"
+            else:
+                kind = "solution"
+            detail = "；".join(check.details[:2])
+            problems.append((kind, f"{check.summary}{'：' + detail if detail else ''}"))
+        return problems
 
     @staticmethod
     def _validate_structure(

@@ -1339,7 +1339,17 @@ export const EN = {
 "重出时只用高中课本里的概念和说法；要求里出现的大学名词要换成高中的说法或高中能解的设计。": "When regenerating, use only high-school textbook concepts and wording; turn any university terms in the request into high-school wording or a design solvable in high school.",
 "这个对话里的出题记录、聊天和组卷过程会删掉，不能恢复。组好的试卷还在，不受影响。": "This chat's question history, messages and paper-building steps will be deleted for good. Existing papers are not affected.",
 "再试时会带上这次没出成的原因，命题员会避开同样的问题；也可以降一档难度，或者换一个考点。": "Trying again passes along why this attempt failed, so the composer avoids the same problems. You can also lower the difficulty one level or pick another topic.",
-"题干没给具体长度时，取看起来匀称的数值。曲线上的点要真的在曲线上；切线的切点要按题设算出来": "If the statement gives no lengths, pick well-proportioned values. Points on a curve must lie on it; compute tangent points from the given data"
+"题干没给具体长度时，取看起来匀称的数值。曲线上的点要真的在曲线上；切线的切点要按题设算出来": "If the statement gives no lengths, pick well-proportioned values. Points on a curve must lie on it; compute tangent points from the given data",
+"按题型要求补齐题干和选项": "Completing the statement and options for the question type",
+"退回命题员修改": "sent back to the composer",
+"让解题员重写解析": "the solver rewrites the solution",
+"交付前的检查没通过，退回命题员修改": "The final check before delivery didn't pass; sent back to the composer",
+"交付前的检查没通过，让解题员重写解析": "The final check before delivery didn't pass; the solver rewrites the solution",
+"交付前的检查发现题面不合要求": "The final check found a problem in the statement",
+"交付前的检查发现解析或答案不完整": "The final check found the solution or answer incomplete",
+"题面的格式和题型要求对不上": "The statement's format doesn't match the question type",
+"选项编号有重复": "Duplicate option letters",
+"选项内容不能为空，也不能有两个选项完全相同": "Options can't be empty, and no two options may be identical"
 },
 "patterns": [
 [
@@ -2689,6 +2699,38 @@ export const EN = {
 [
 "图里写了“{0}”，这是题目要求的结果，不能标在图上；只标点名，不写坐标",
 "The figure shows \"{0}\", which is what the question asks for; label the point by name only, without coordinates"
+],
+[
+"{0}，重新写一份解析",
+"{0}; writing the solution again"
+],
+[
+"交付前的检查没通过，{0}",
+"The final check before delivery didn't pass; {0}"
+],
+[
+"第 {0} 段解析试了两次都没写成",
+"Solution part {0} failed twice"
+],
+[
+"第 {0} 段解析拆成小段也没写成",
+"Solution part {0} failed even when split into smaller parts"
+],
+[
+"第 {0} 段解析试了两次都没写成，重新写一份解析",
+"Solution part {0} failed twice; writing the solution again"
+],
+[
+"第 {0} 段解析拆成小段也没写成，重新写一份解析",
+"Solution part {0} failed even when split; writing the solution again"
+],
+[
+"要出的是{0}，这一版写成了{1}",
+"A {0} was requested, but this version is a {1}"
+],
+[
+"选择题要给出 A、B、C、D 四个选项，这一版只有 {0} 个",
+"A choice question needs four options A–D; this version has only {0}"
 ]
 ]
 };
