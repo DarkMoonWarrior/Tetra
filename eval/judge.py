@@ -5,10 +5,12 @@
 2. 题目成不成立：3 次里至少 2 次认为条件矛盾、条件不足或答案不唯一，记为"题目不成立"。
 3. 考点和难度：对照命题要求，看题目是不是考了要求的内容，再按 1–5 星估一个难度。
 
-    .venv/Scripts/python eval/judge.py pilot [--model deepseek-v4-pro] [--workers 6]
+    .venv/Scripts/python eval/judge.py small [--model deepseek-v4-pro] [--workers 6]
 
-结果追加到 eval/results/<pilot|full>/judge.jsonl，一行对应 runs.jsonl 里出成的一道题，停了可以接着跑。
-评判默认用 deepseek-v4-pro：和出题用的 Flash 不是同一个模型，两边的错不容易撞在一起。
+结果追加到 eval/results/<pilot|small|full>/judge.jsonl，一行对应 runs.jsonl 里出成的一道题，停了可以接着跑。
+评判默认用 deepseek-flash（重解时开思考），同样的题比 deepseek-v4-pro 便宜三倍多（精简版评判约 ¥4）。
+代价是和出题是同一个模型，两边可能犯同样的错，把错题判成对。这对各配置的影响差不多，比较配置之间的
+高低仍然成立；另外人工核对 30 道（report.py --audit 30），报告评判模型和人工结论的一致率。
 """
 
 from __future__ import annotations
@@ -254,8 +256,8 @@ def judge_one(judge: Judge, run: dict) -> dict | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("which", choices=["pilot", "full"])
-    parser.add_argument("--model", default="deepseek-v4-pro")
+    parser.add_argument("which", choices=["pilot", "small", "full"])
+    parser.add_argument("--model", default="deepseek-flash", help="评判模型；要和出题模型分开可以用 deepseek-v4-pro（贵三倍多）")
     parser.add_argument("--workers", type=int, default=6, help="同时评几道题（每道题内部再并行 4 个调用）")
     args = parser.parse_args()
 

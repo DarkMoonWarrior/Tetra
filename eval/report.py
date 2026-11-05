@@ -1,8 +1,8 @@
 """汇总 ablation.py 和 judge.py 的结果：每次出题一行的明细表、每种配置的汇总表、图表和表格片段。
 
-    python eval/report.py pilot              汇总试跑，并按试跑估计正式实验要花多少钱、多少时间
-    python eval/report.py full               汇总正式实验
-    python eval/report.py full --audit 30    另外抽 30 道题给人工核对（human_audit.md 看题，human_audit.csv 填结论）
+    python eval/report.py small --audit 30   汇总正式实验（精简版），另外抽 30 道题给人工核对（human_audit.md 看题，human_audit.csv 填结论）
+    python eval/report.py pilot              汇总试跑，并按试跑估计完整版要花多少钱、多少时间
+    python eval/report.py full               汇总完整版
 
 human_audit.csv 的"人工结论"一列填好（对 / 错 / 题目不成立）以后再运行一次，会算出评判模型和人工的一致率。
 用装了 matplotlib 的系统 Python 运行即可，不需要项目的 .venv。
@@ -474,7 +474,7 @@ def audit_agreement(folder) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("which", choices=["pilot", "full"])
+    parser.add_argument("which", choices=["pilot", "small", "full"])
     parser.add_argument("--audit", type=int, default=0, help="抽多少道题做人工核对")
     args = parser.parse_args()
     folder = RESULTS / args.which

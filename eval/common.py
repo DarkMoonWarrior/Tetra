@@ -83,6 +83,9 @@ def latest(rows: list[dict]) -> dict[str, dict]:
 
 # 账户余额用完（HTTP 402）以后脚本就停下，不再一个个发注定失败的请求
 OUT_OF_BALANCE = threading.Event()
+# 被限流（HTTP 429）等了几次、共几秒：等的时间算在那几道题的用时里，结束时报出来，看用时可不可信
+RATE_LIMITED = {"times": 0, "seconds": 0.0}
+_RATE_LOCK = threading.Lock()
 
 
 def patient_client(*, api_key: str, model: str, base_url: str, timeout_seconds: int):
@@ -100,7 +103,12 @@ def patient_client(*, api_key: str, model: str, base_url: str, timeout_seconds: 
                         OUT_OF_BALANCE.set()
                     if attempt == 3 or not re.search(r"HTTP (?:429|5\d\d)", str(exc)):
                         raise
-                    time.sleep(15 * (attempt + 1))
+                    wait = 15 * (attempt + 1)
+                    if "HTTP 429" in str(exc):
+                        with _RATE_LOCK:
+                            RATE_LIMITED["times"] += 1
+                            RATE_LIMITED["seconds"] += wait
+                    time.sleep(wait)
             raise AssertionError("unreachable")
 
     return PatientClient(api_key=api_key, model=model, base_url=base_url, timeout_seconds=timeout_seconds)

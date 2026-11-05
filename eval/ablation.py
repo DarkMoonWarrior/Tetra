@@ -1,11 +1,12 @@
 """对比（消融）实验：同一批命题要求，用不同的流程配置各出一遍题，记下成败、调用次数、Token、用时和费用。
 
 在项目目录下用项目的 .venv 运行：
+    .venv/Scripts/python eval/ablation.py small --budget 2.5   正式实验（精简版）：30 道题 × A、B、C、D 四种结构配置，约 ¥14
     .venv/Scripts/python eval/ablation.py pilot             试跑：10 道题 × 9 种配置
-    .venv/Scripts/python eval/ablation.py full              正式：60 道题 × 9 种配置
-    .venv/Scripts/python eval/ablation.py full --configs A,B,C --workers 8
+    .venv/Scripts/python eval/ablation.py full              完整版：60 道题 × 9 种配置，约 ¥118，嫌贵没跑
+    .venv/Scripts/python eval/ablation.py small --configs C-think,C-gate   以后想补机制消融，可以只加几种配置
 
-每出完一道题往 eval/results/<pilot|full>/runs.jsonl 追加一行；中途停了，再运行会接着跑没出完的。
+每出完一道题往 eval/results/<pilot|small|full>/runs.jsonl 追加一行；中途停了，再运行会接着跑没出完的。
 出题直接用 mingti 里的 TeamProvider，和界面上的"快速出题"一样：一个方案，所有角色都用 DeepSeek Flash，
 思考强度"高"；调用超过 70 次或超过 8 分钟就停下，算没出成。不经过网页服务，也不写应用自己的命题记录和题库。
 题目通过检查之后的整理解析、配图两步不跑，它们不改题目和答案。
@@ -25,7 +26,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from common import OUT_OF_BALANCE, RESULTS, ROOT, JsonlWriter, call_cost, latest, patient_client, read_jsonl, usage_of
+from common import (
+    OUT_OF_BALANCE, RATE_LIMITED, RESULTS, ROOT, JsonlWriter, call_cost, latest, patient_client, read_jsonl, usage_of,
+)
 
 from mingti.config import CURRICULUM_CSV, load_settings
 from mingti.curriculum import CsvCurriculumCatalog
@@ -79,6 +82,14 @@ QUOTA = {
     ("fill_blank", 2): 2, ("fill_blank", 3): 3, ("fill_blank", 4): 5,
     ("open_response", 3): 5, ("open_response", 4): 8, ("open_response", 5): 8,
 }
+# 精简版（30 道）：每个格子取上面 60 道里的前几道，所以试跑的 10 道都在里面；4、5 星 16 道
+SMALL_QUOTA = {
+    ("single_choice", 1): 2, ("single_choice", 2): 2, ("single_choice", 3): 3, ("single_choice", 4): 3,
+    ("multiple_choice", 3): 2, ("multiple_choice", 4): 3,
+    ("fill_blank", 2): 1, ("fill_blank", 3): 2, ("fill_blank", 4): 3,
+    ("open_response", 3): 2, ("open_response", 4): 4, ("open_response", 5): 3,
+}
+STRUCTURE = ("A", "B", "C", "D")  # 精简版默认只跑结构消融
 # 试跑：从下面 10 个格子各取正式测试集里的第一道
 PILOT_CELLS = [
     ("single_choice", 1), ("single_choice", 3), ("single_choice", 4), ("multiple_choice", 3), ("multiple_choice", 4),
@@ -96,6 +107,8 @@ def pick_specs(which: str) -> list[dict]:
     chosen = {cell: rng.sample(cells[cell], count) for cell, count in QUOTA.items()}
     if which == "pilot":
         return [chosen[cell][0] for cell in PILOT_CELLS]
+    if which == "small":
+        return [spec for cell, count in SMALL_QUOTA.items() for spec in chosen[cell][:count]]
     return [spec for cell in QUOTA for spec in chosen[cell]]
 
 
@@ -313,14 +326,15 @@ def run_one(spec: dict, name: str, routes: dict, catalog, verifier, budget: floa
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("which", choices=["pilot", "full"])
-    parser.add_argument("--configs", default=",".join(CONFIGS), help="逗号分隔，默认全部 9 种")
+    parser.add_argument("which", choices=["pilot", "small", "full"])
+    parser.add_argument("--configs", default="", help="逗号分隔；默认 small 跑 A,B,C,D，pilot 和 full 跑全部 9 种")
     parser.add_argument("--workers", type=int, default=8, help="同时出几道题")
     parser.add_argument("--limit", type=int, default=0, help="只跑前几次（调试用）")
     parser.add_argument("--budget", type=float, default=0, help="这次最多花多少美元（闲时价算），超过就不再开始新的出题")
     args = parser.parse_args()
 
     names = [name.strip() for name in args.configs.split(",") if name.strip()]
+    names = names or list(STRUCTURE if args.which == "small" else CONFIGS)
     unknown = [name for name in names if name not in CONFIGS]
     if unknown:
         raise SystemExit(f"没有这些配置：{unknown}；可选 {list(CONFIGS)}")
@@ -362,6 +376,9 @@ def main() -> None:
                 flush=True,
             )
     print(f"这次共花 ${SPENT['usd']:.3f}（闲时价）", flush=True)
+    if RATE_LIMITED["times"]:
+        print(f"其间被限流（HTTP 429）等了 {RATE_LIMITED['times']} 次、共 {RATE_LIMITED['seconds']:.0f} 秒，"
+              "这些题的用时偏长；余额多一些或者 --workers 调小可以避免", flush=True)
     if OUT_OF_BALANCE.is_set():
         print("DeepSeek 账户余额不足（HTTP 402），已经停下；充值后再运行同一条命令，会接着跑没出完的。", flush=True)
     elif args.budget and SPENT["usd"] > args.budget:
