@@ -38,6 +38,10 @@
 
 `.env` 和 `data/runtime/models.json` 里有 API Key，两者都已写进 `.gitignore`；打包代码时也不要带上它们。
 
+## 专题识别模型
+
+`data/topic_model.json.gz` 是离线训练后导出的专题识别模型：词表、idf、各专题的系数和两个阈值，不含任何训练题目，`mingti/topic_model.py` 只用标准库读取和计算。训练数据是讲义题库，不随仓库发布；换了训练数据或者改了文字预处理（`normalize`），要重新导出这个文件，并保证两边的 `normalize` 一致。
+
 ## 流程评测
 
 `eval/` 用同一批命题要求跑不同的流程配置，比较交付率、答案正确率、调用次数、Token、用时和费用，用来判断每个环节值不值得保留。

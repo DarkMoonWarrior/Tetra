@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from mingti.deepseek import DeepSeekClientError, DeepSeekJsonClient, DeepSeekJsonResponseError
 from mingti.math_content import MATH_DISPLAY_INSTRUCTIONS, tidy_math_text
 from mingti.model_operations import ModelRunRecorder, NullModelRunRecorder
+from mingti.topic_model import narrow_curriculum_lines
 from mingti.question_authoring.schemas import (
     ProviderQuestionDraft,
     ProviderQuestionSolution,
@@ -687,7 +688,7 @@ class DeepSeekQuestionAuthoringProvider:
                 input_value={
                     "design_brief": provider_input["design_brief"],
                     "question_statement": core.model_dump(mode="json"),
-                    "allowed_curriculum_nodes": provider_input["allowed_curriculum_nodes"],
+                    "allowed_curriculum_nodes": self._plan_curriculum_nodes(provider_input, core),
                     **({"earlier_solution_problems": earlier_problems} if earlier_problems else {}),
                 },
                 output_schema=self._solution_plan_schema(),
@@ -2133,6 +2134,16 @@ class DeepSeekQuestionAuthoringProvider:
                 if context.curriculum is None or item.chapter == context.curriculum.chapter
             ],
         }
+
+    @staticmethod
+    def _plan_curriculum_nodes(provider_input: dict, core: _QuestionStatement) -> list[str]:
+        """给写好的题选知识点用的知识点表。老师指定了考点时已经只有同一章的，原样用；没指定时按专题识别
+        缩小，拿不准就照旧给全部（见 mingti/topic_model.py）。只影响题目挂哪个知识点，不影响题目和答案。"""
+        lines = provider_input["allowed_curriculum_nodes"]
+        if provider_input.get("teacher_curriculum_guidance") is not None:
+            return lines
+        text = " ".join([core.stem_latex or core.stem_plain, *(option.text for option in core.options)])
+        return narrow_curriculum_lines(lines, text)[0]
 
     @staticmethod
     def _normalized_plan(plan):
