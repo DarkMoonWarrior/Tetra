@@ -55,10 +55,6 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
           试卷<span class="rail-count" id="paperCount"></span>
         </button>
-        <button class="rail-link" id="experimentLink" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
-          对比实验
-        </button>
       </nav>
       <h2 class="rail-title">对话</h2>
       <ul class="history-list" id="historyList"></ul>
@@ -101,29 +97,6 @@
 
           <section class="library" id="bankView" hidden></section>
           <section class="papers" id="paperView" hidden></section>
-
-          <section class="experiment" id="experiment" hidden>
-            <h1>对比实验</h1>
-            <p class="lead">从 9 套模拟卷的 171 条命题要求里抽出测试集，用下面几种配置分别出题，看每加一道检查、每多试一个方案，质量和代价各变化多少。实验跑完后，结果会放在这里。</p>
-            <table class="config-table">
-              <thead><tr><th>配置</th><th>包含的环节</th><th>想回答的问题</th><th>状态</th></tr></thead>
-              <tbody>
-                <tr><td><span class="key">A</span>单次生成</td><td>只有命题</td><td>直接让大模型出题，质量是什么水平</td><td><span class="pill">待运行</span></td></tr>
-                <tr><td><span class="key">B</span>加审题</td><td>命题、审题、退回修改</td><td>出题后先审一遍，能拦住多少有问题的题</td><td><span class="pill">待运行</span></td></tr>
-                <tr><td><span class="key">C</span>完整闭环</td><td>命题、审题、解题、复核</td><td>解题后再复核，答案正确率能提高多少</td><td><span class="pill">待运行</span></td></tr>
-                <tr><td><span class="key">D</span>加独立验算</td><td>C 加验算员</td><td>换个角色再独立算一遍，值不值这份开销</td><td><span class="pill">待运行</span></td></tr>
-                <tr><td><span class="key">E</span>三个方案并行</td><td>C，同时试三个方案</td><td>多试几个方案能省多少等待时间，多花多少 Token</td><td><span class="pill">待运行</span></td></tr>
-              </tbody>
-            </table>
-            <h2>怎么比</h2>
-            <ul class="metric-list">
-              <li>规则检查通过率：结构、正确选项个数、干扰项这些程序能查的项目</li>
-              <li>答案正确率：另请模型独立解 3 次取多数作为判定，再人工抽查 30 道，看这个判定靠不靠谱</li>
-              <li>是否符合要求：知识点、题型、难度和要求一致吗</li>
-              <li>人工评分：组员不知道是哪种配置出的题，直接打分</li>
-              <li>代价：每道题的模型调用次数、Token 和用时</li>
-            </ul>
-          </section>
         </div>
         <div class="dock" id="dock"></div>
       </section>

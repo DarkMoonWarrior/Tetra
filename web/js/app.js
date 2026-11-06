@@ -115,7 +115,6 @@ const ui = {
   dock: $('#dock'),
   hero: $('#hero'),
   conversation: $('#conversation'),
-  experiment: $('#experiment'),
   threadScroll: $('#threadScroll'),
   sheetPanel: $('#sheetPanel'),
   sheetScroll: $('#sheetScroll'),
@@ -1132,7 +1131,6 @@ function setMode(mode) {
   ui.body.classList.toggle('is-idle', idle);
   ui.hero.hidden = !idle;
   ui.conversation.hidden = !chat;
-  ui.experiment.hidden = mode !== 'experiment';
   ui.bankView.hidden = mode !== 'bank';
   ui.paperView.hidden = mode !== 'papers';
   ui.dock.hidden = !(idle || chat);
@@ -1156,7 +1154,6 @@ function setMode(mode) {
   }
   closeRail();
   renderContext();
-  $('#experimentLink').setAttribute('aria-current', mode === 'experiment' ? 'page' : 'false');
   $('#bankLink').setAttribute('aria-current', mode === 'bank' ? 'page' : 'false');
   $('#papersLink').setAttribute('aria-current', mode === 'papers' ? 'page' : 'false');
   if (!chat) stopReplay();
@@ -2834,7 +2831,6 @@ function bindEvents() {
     ui.prompt.focus();
     if (state.job) toast('上一道题还在出，出好以后才能开始新的一道');
   });
-  $('#experimentLink').addEventListener('click', () => setMode('experiment'));
   $('#bankLink').addEventListener('click', () => openBank());
   $('#papersLink').addEventListener('click', () => openPapers());
   $('#menuToggle').addEventListener('click', () => {

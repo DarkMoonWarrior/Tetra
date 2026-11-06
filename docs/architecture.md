@@ -93,9 +93,8 @@ FastAPI  mingti/server.py
 | `mingti/launcher.py` `run.py` `pyproject.toml` | `tetra` 启动命令：首次运行时准备 `.venv`，然后启动服务、打开浏览器 |
 | `web/` | 界面：`index.html`、`app.css`，`js/` 下按功能分文件；KaTeX 在 `vendor/` |
 | `data/curriculum/` | 两版教材的知识树 CSV |
-| `data/blueprint_specs.json` | 171 条示例命题要求：首页示例和评测用的测试集 |
+| `data/blueprint_specs.json` | 171 条示例命题要求，首页的示例从这里抽 |
 | `tools/` | `build_i18n.py` 生成英文界面对照表；`build_blueprint_specs.py` 生成上面的 JSON（公式写法在 `blueprint_tex.json`） |
-| `eval/` | 流程评测：`ablation.py` 出题、`judge.py` 评判、`report.py` 汇总出表和图，`common.py` 是共用部分 |
 
 ## API 概览
 

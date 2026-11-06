@@ -196,7 +196,7 @@ tetra
 |---|---|
 | [使用手册](docs/user-guide.md) | 启动选项、模型配置、出题、组卷、识题和各项设置 |
 | [架构说明](docs/architecture.md) | 系统结构、出题流水线、项目目录和 API 概览 |
-| [开发指南](docs/development.md) | 本地开发、界面翻译、运行数据和流程评测 |
+| [开发指南](docs/development.md) | 本地开发、界面翻译、运行数据和专题识别模型 |
 
 ## 参与贡献
 
