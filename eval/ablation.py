@@ -1,15 +1,20 @@
 """对比（消融）实验：同一批命题要求，用不同的流程配置各出一遍题，记下成败、调用次数、Token、用时和费用。
 
 在项目目录下用项目的 .venv 运行：
-    .venv/Scripts/python eval/ablation.py small --budget 2.5   正式实验（精简版）：30 道题 × A、B、C、D 四种结构配置，约 ¥14
-    .venv/Scripts/python eval/ablation.py pilot             试跑：10 道题 × 9 种配置
-    .venv/Scripts/python eval/ablation.py full              完整版：60 道题 × 9 种配置，约 ¥118，嫌贵没跑
-    .venv/Scripts/python eval/ablation.py small --configs C-think,C-gate   以后想补机制消融，可以只加几种配置
+    .venv/Scripts/python eval/ablation.py small --budget 3    正式实验（精简版）：30 道题 × SMALL_DEFAULT 里的 7 种配置
+    .venv/Scripts/python eval/ablation.py pilot             试跑：10 道题 × 全部配置
+    .venv/Scripts/python eval/ablation.py full              完整版：60 道题 × 全部配置，嫌贵没跑
+    .venv/Scripts/python eval/ablation.py small --configs C-gate,C-xcheck   以后想补机制消融，可以只加几种配置
 
 每出完一道题往 eval/results/<pilot|small|full>/runs.jsonl 追加一行；中途停了，再运行会接着跑没出完的。
+每行记下代码版本（git 提交号；出题流程、实验脚本或测试集有没提交的改动时后面加 -dirty）和提示词版本。
 出题直接用 mingti 里的 TeamProvider，和界面上的"快速出题"一样：一个方案，所有角色都用 DeepSeek Flash，
 思考强度"高"；调用超过 70 次或超过 8 分钟就停下，算没出成。不经过网页服务，也不写应用自己的命题记录和题库。
 题目通过检查之后的整理解析、配图两步不跑，它们不改题目和答案。
+
+Z（直接提问）是基线，不走出题流程：把同一条出题要求原样发给同一个模型（同样开思考），只规定按 JSON 返回
+题干、选项、答案和解析，相当于老师直接在对话框里让大模型出题。格式不对时带着问题重发一次（相当于点
+"重新生成"），还不对算没出成。
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ import argparse
 import json
 import random
 import re
+import subprocess
 import threading
 import time
 from collections import defaultdict
@@ -35,6 +41,7 @@ from mingti.curriculum import CsvCurriculumCatalog
 from mingti.curriculum_tree import load_tree
 from mingti.deepseek import DeepSeekClientError, DeepSeekJsonResponseError
 from mingti.figures import FIGURE_RULE
+from mingti.math_content import MATH_DISPLAY_INSTRUCTIONS
 from mingti.math_verifier import MathVerifier
 from mingti.models import ModelRoute
 from mingti.question_authoring import (
@@ -44,13 +51,14 @@ from mingti.question_authoring import (
     QuestionAuthoringProviderError,
     QuestionDesignBrief,
 )
-from mingti.question_authoring.providers import PipelineSwitches
+from mingti.question_authoring.providers import PROMPT_REVISION, PipelineSwitches
 from mingti.question_authoring.scope import beyond_curriculum_methods, university_only_terms
 from mingti.team import ROLES, TeamProvider, role_of
 from mingti.tracking import StopRequested
 
 MODEL = "deepseek-flash"
 SPENT = {"usd": 0.0}  # 这次运行已经花掉的钱，超过 --budget 就不再开始新的出题
+VERSION: dict = {}  # 这次实验用的代码版本，main() 里填，写进每一行
 
 
 @dataclass(frozen=True)
@@ -58,10 +66,12 @@ class Config:
     label: str
     switches: PipelineSwitches = field(default_factory=PipelineSwitches)
     verify: bool = False
+    direct: bool = False  # Z：不走出题流程，一条普通提示词直接出题
 
 
-# 结构消融：一层层加角色。机制消融：在 C 上每次只关掉一个 11 月 4 日加的机制。
+# 基线 Z：直接问大模型。结构消融：一层层加角色。机制消融：在 C 上每次只关掉一个机制。
 CONFIGS = {
+    "Z": Config("Z 直接提问（一条普通提示词）", direct=True),
     "A": Config("A 只有命题员", PipelineSwitches(stop_after="compose")),
     "B": Config("B 加审题员", PipelineSwitches(stop_after="review")),
     "C": Config("C 加解题员、复核员（完整闭环）"),
@@ -90,7 +100,8 @@ SMALL_QUOTA = {
     ("fill_blank", 2): 1, ("fill_blank", 3): 2, ("fill_blank", 4): 3,
     ("open_response", 3): 2, ("open_response", 4): 4, ("open_response", 5): 3,
 }
-STRUCTURE = ("A", "B", "C", "D")  # 精简版默认只跑结构消融
+# 精简版默认跑：基线、结构消融，再加试跑里一关掉交付率就掉得最多的两个机制
+SMALL_DEFAULT = ("Z", "A", "B", "C", "D", "C-think", "C-construct")
 # 试跑：从下面 10 个格子各取正式测试集里的第一道
 PILOT_CELLS = [
     ("single_choice", 1), ("single_choice", 3), ("single_choice", 4), ("multiple_choice", 3), ("multiple_choice", 4),
@@ -164,6 +175,106 @@ def make_brief(spec: dict) -> tuple[QuestionDesignBrief, dict | None]:
         additional_constraints=f"题目内容：{spec['topic']}\n{FIGURE_RULE}"[:2000],
     )
     return brief, kp
+
+
+# ---------- Z：直接提问 ----------
+
+# 只规定返回的格式，不教怎么出题：没有先构造、审题、解题、复核，也没有课程范围的提醒
+DIRECT_FORMAT = (
+    "按 JSON 返回这道题。stem：题干，选择题的选项不写在题干里；"
+    "options：选项内容的列表，单选题、多选题各写 4 个，不写 A、B、C、D 字母，填空题和解答题写空数组；"
+    "answer：答案，选择题写正确选项的字母（多选题写全部，如 ACD），填空题写结果，解答题按小问顺序写每一问的结论；"
+    "solution：解析，一步一个字符串。" + MATH_DISPLAY_INSTRUCTIONS
+)
+DIRECT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "stem": {"type": "string"},
+        "options": {"type": "array", "items": {"type": "string"}},
+        "answer": {"type": "string"},
+        "solution": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["stem", "options", "answer", "solution"],
+}
+CHOICE_TYPES = {"single_choice", "multiple_choice"}
+
+
+class DirectFailed(Exception):
+    """直接提问两次都没给出格式完整的一道题。"""
+
+
+def direct_question(question_type: str, payload: dict) -> tuple[dict | None, str]:
+    """把模型返回的 JSON 换成和流程交付的题一样的字段，评判和人工核对照常用；格式不对时返回（None，问题）。"""
+    stem = str(payload.get("stem") or "").strip()
+    options = [re.sub(r"^\s*[A-D]\s*[．.、:：)）]\s*", "", str(o)).strip() for o in payload.get("options") or []]
+    options = [o for o in options if o]
+    answer = str(payload.get("answer") or "").strip()
+    steps = [str(s).strip() for s in payload.get("solution") or [] if str(s).strip()]
+    choice = question_type in CHOICE_TYPES
+    letters = "".join(sorted(set(re.findall(r"[A-D]", answer.upper())))) if choice else ""
+    problems = []
+    if not stem:
+        problems.append("没有题干")
+    if not answer:
+        problems.append("没有答案")
+    if choice and len(options) != 4:
+        problems.append(f"选择题要 4 个选项，给了 {len(options)} 个")
+    if choice and answer and (not letters or (question_type == "single_choice" and len(letters) != 1)):
+        problems.append(f"选择题的答案要写选项字母，写的是“{answer[:40]}”")
+    if problems:
+        return None, "；".join(problems)
+    return {
+        "question_type": question_type,
+        "stem_plain": stem.replace("$", ""),
+        "stem_latex": stem,
+        "options": [{"key": "ABCD"[i], "text": text} for i, text in enumerate(options)] if choice else [],
+        "answer_value": letters or answer,
+        "final_answer": letters or answer,
+        "solution_method": "",
+        "solution_steps": steps,
+        "estimated_difficulty": None,
+        "knowledge_points": [],
+        "solution_status": "direct",
+        "solution_issue": "",
+    }, ""
+
+
+def run_direct(spec: dict, brief: QuestionDesignBrief, client, run: "Run") -> dict:
+    """Z：出题要求原样发给模型。和其他配置收到的要求一样：要求本身、题目内容、配图规则。"""
+    text = brief.request_text + "\n" + (brief.additional_constraints or "")
+    problem = ""
+    for _ in range(2):
+        retry = f"\n上一次的回答格式不对：{problem}。请按要求重新出完整的一道题。" if problem else ""
+        call = {"stage": "direct", "role": "composer", "model": MODEL, "started": time.time()}
+        with run._lock:
+            run.calls.append(call)
+        raw: dict = {}
+        try:
+            raw = client.request(
+                instructions=DIRECT_FORMAT, input_text=text + retry, action="直接出题",
+                output_schema=DIRECT_SCHEMA, max_tokens=8000, thinking=True,
+            )
+        finally:
+            call.update(seconds=round(time.time() - call["started"], 2), **usage_of(raw))
+        question, problem = direct_question(spec["question_type"], json.loads(raw["output"][0]["content"][0]["text"]))
+        if question:
+            return question
+    raise DirectFailed(problem)
+
+
+def code_version() -> dict:
+    """这次实验用的代码：git 提交号；出题流程（mingti）、实验脚本或测试集有没提交的改动时加 -dirty。"""
+
+    def git(*args: str) -> str:
+        try:
+            done = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return done.stdout.strip() if done.returncode == 0 else ""
+
+    commit = git("rev-parse", "--short", "HEAD") or "unknown"
+    dirty = git("status", "--porcelain", "--", "mingti", "eval/*.py", "data/blueprint_specs.json", "data/curriculum")
+    return {"code_version": commit + ("-dirty" if dirty else ""), "prompt_revision": PROMPT_REVISION}
 
 
 # ---------- 一次出题 ----------
@@ -275,35 +386,50 @@ def run_one(spec: dict, name: str, routes: dict, catalog, verifier, budget: floa
         return None  # 余额用完或超出预算：不再开始新的出题
     config = CONFIGS[name]
     run = Run()
-    team = TeamProvider(lanes=1, routes=routes, verify=config.verify, hooks=run, thinking=True, switches=config.switches)
-    authoring = QuestionAuthoring(curriculum=catalog, provider=team, math_verifier=verifier)
     brief, kp = make_brief(spec)
     status, error, question = "succeeded", "", None
-    try:
-        if config.switches.stop_after == "solve":
-            # 和界面出题同一条路，包括最后的结构、超纲和可信检查
-            question = authoring.create_draft(brief).model_dump(mode="json")
-        else:
-            # 只跑到命题或审题的配置没有解析，过不了 create_draft 最后的检查，直接拿 TeamProvider 交出的题
-            context = QuestionAuthoringContext(
-                brief=brief,
-                question_type=brief.question_type,
-                curriculum=authoring._resolve_curriculum_guidance(brief),
-                curriculum_options=authoring._curriculum_options(),
-            )
-            draft = QuestionAuthoring._canonicalize_generated_content(team.generate(context))
-            question = draft.model_dump(mode="json")
-    except (QuestionAuthoringError, QuestionAuthoringProviderError) as exc:
-        status, error = "failed", str(exc)
-    except Exception as exc:  # noqa: BLE001 - 程序出错记下来，下次再跑
-        status, error = "error", f"{type(exc).__name__}: {exc}"
-    if status == "failed" and run.network_errors and not run.over_budget:
-        status, error = "error", f"{error}（网络或接口出错：{run.network_errors[-1]}）"
+    if config.direct:
+        try:
+            question = run_direct(spec, brief, routes["composer"].client, run)
+        except DirectFailed as exc:
+            status, error = "failed", f"格式一直不对：{exc}"
+        except DeepSeekJsonResponseError as exc:  # 回的 JSON 两次都读不了，算这种配置没出成
+            status, error = "failed", str(exc)
+        except DeepSeekClientError as exc:  # 网络、余额这些不算配置的问题，下次再跑
+            status, error = "error", f"网络或接口出错：{exc}"
+        except Exception as exc:  # noqa: BLE001 - 程序出错记下来，下次再跑
+            status, error = "error", f"{type(exc).__name__}: {exc}"
+    else:
+        team = TeamProvider(
+            lanes=1, routes=routes, verify=config.verify, hooks=run, thinking=True, switches=config.switches
+        )
+        authoring = QuestionAuthoring(curriculum=catalog, provider=team, math_verifier=verifier)
+        try:
+            if config.switches.stop_after == "solve":
+                # 和界面出题同一条路，包括最后的结构、超纲和可信检查
+                question = authoring.create_draft(brief).model_dump(mode="json")
+            else:
+                # 只跑到命题或审题的配置没有解析，过不了 create_draft 最后的检查，直接拿 TeamProvider 交出的题
+                context = QuestionAuthoringContext(
+                    brief=brief,
+                    question_type=brief.question_type,
+                    curriculum=authoring._resolve_curriculum_guidance(brief),
+                    curriculum_options=authoring._curriculum_options(),
+                )
+                draft = QuestionAuthoring._canonicalize_generated_content(team.generate(context))
+                question = draft.model_dump(mode="json")
+        except (QuestionAuthoringError, QuestionAuthoringProviderError) as exc:
+            status, error = "failed", str(exc)
+        except Exception as exc:  # noqa: BLE001 - 程序出错记下来，下次再跑
+            status, error = "error", f"{type(exc).__name__}: {exc}"
+        if status == "failed" and run.network_errors and not run.over_budget:
+            status, error = "error", f"{error}（网络或接口出错：{run.network_errors[-1]}）"
 
     calls = run.calls
     return {
         "id": f"{name}|{spec['id']}",
         "config": name,
+        **VERSION,
         "spec_id": spec["id"],
         "question_type": spec["question_type"],
         "difficulty": spec["target_difficulty"],
@@ -334,14 +460,16 @@ def run_one(spec: dict, name: str, routes: dict, catalog, verifier, budget: floa
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("which", choices=["pilot", "small", "full"])
-    parser.add_argument("--configs", default="", help="逗号分隔；默认 small 跑 A,B,C,D，pilot 和 full 跑全部 9 种")
+    parser.add_argument(
+        "--configs", default="", help=f"逗号分隔；默认 small 跑 {','.join(SMALL_DEFAULT)}，pilot 和 full 跑全部 {len(CONFIGS)} 种"
+    )
     parser.add_argument("--workers", type=int, default=8, help="同时出几道题")
     parser.add_argument("--limit", type=int, default=0, help="只跑前几次（调试用）")
     parser.add_argument("--budget", type=float, default=0, help="这次最多花多少美元（闲时价算），超过就不再开始新的出题")
     args = parser.parse_args()
 
     names = [name.strip() for name in args.configs.split(",") if name.strip()]
-    names = names or list(STRUCTURE if args.which == "small" else CONFIGS)
+    names = names or list(SMALL_DEFAULT if args.which == "small" else CONFIGS)
     unknown = [name for name in names if name not in CONFIGS]
     if unknown:
         raise SystemExit(f"没有这些配置：{unknown}；可选 {list(CONFIGS)}")
@@ -355,6 +483,10 @@ def main() -> None:
     print(f"{len(specs)} 道题 × {len(names)} 种配置，已完成 {len(done)} 次，这次要跑 {len(todo)} 次", flush=True)
     if not todo:
         return
+    VERSION.update(code_version())
+    print(f"代码版本 {VERSION['code_version']}，提示词版本 {VERSION['prompt_revision']}", flush=True)
+    if VERSION["code_version"].endswith("-dirty"):
+        print("注意：出题流程、实验脚本或测试集有没提交的改动，结果对不上某一次提交；正式跑之前先提交。", flush=True)
 
     settings = load_settings()
     client = patient_client(
