@@ -211,15 +211,15 @@
    "judge_cost_usd_offpeak": 0.0956
   },
   "C-think": {
-   "n": 29,
+   "n": 30,
    "succeeded": 27,
    "flagged": 2,
-   "success_rate": 0.9310344827586207,
+   "success_rate": 0.9,
    "success_ci": [
-    0.7803505240414808,
-    0.9808791359020055
+    0.7437855868473339,
+    0.9654007400402839
    ],
-   "over_budget": 3,
+   "over_budget": 4,
    "judged": 27,
    "correct": 23,
    "wrong": 1,
@@ -230,18 +230,18 @@
     0.6752093665317052,
     0.9408416814035512
    ],
-   "usable_rate": 0.7931034482758621,
+   "usable_rate": 0.7666666666666667,
    "usable_ci": [
-    0.6160955339174228,
-    0.9015406348441479
+    0.5907132766967574,
+    0.8820776078949878
    ],
-   "calls": 27.7,
-   "tokens_k": 101.0,
-   "seconds": 106.0,
-   "median_seconds": 54.6,
-   "cost_usd": 0.6029,
-   "cost_usd_offpeak": 0.6029,
-   "cost_per_usable_offpeak": 0.0262,
+   "calls": 29.1,
+   "tokens_k": 107.1,
+   "seconds": 116.2,
+   "median_seconds": 58.5,
+   "cost_usd": 0.6725,
+   "cost_usd_offpeak": 0.6725,
+   "cost_per_usable_offpeak": 0.0292,
    "statement_versions": 1.3,
    "scope_final": 0,
    "scope_intercepted": 0,
@@ -804,15 +804,15 @@
     "judge_cost_usd_offpeak": 0.0739
    },
    "C-think": {
-    "n": 15,
+    "n": 16,
     "succeeded": 13,
     "flagged": 2,
-    "success_rate": 0.8666666666666667,
+    "success_rate": 0.8125,
     "success_ci": [
-     0.6211750079348376,
-     0.9626395301086407
+     0.5699064013154177,
+     0.9340852122641324
     ],
-    "over_budget": 3,
+    "over_budget": 4,
     "judged": 13,
     "correct": 10,
     "wrong": 1,
@@ -823,18 +823,18 @@
      0.49743126004873084,
      0.918206209075343
     ],
-    "usable_rate": 0.6666666666666666,
+    "usable_rate": 0.625,
     "usable_ci": [
-     0.41713125151212976,
-     0.8482389930530876
+     0.3864064709793481,
+     0.815190174452472
     ],
-    "calls": 33.9,
-    "tokens_k": 142.1,
-    "seconds": 146.8,
-    "median_seconds": 87.0,
-    "cost_usd": 0.4412,
-    "cost_usd_offpeak": 0.4412,
-    "cost_per_usable_offpeak": 0.0441,
+    "calls": 36.2,
+    "tokens_k": 150.9,
+    "seconds": 163.4,
+    "median_seconds": 92.5,
+    "cost_usd": 0.5107,
+    "cost_usd_offpeak": 0.5107,
+    "cost_per_usable_offpeak": 0.0511,
     "statement_versions": 1.2,
     "scope_final": 0,
     "scope_intercepted": 0,
