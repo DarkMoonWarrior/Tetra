@@ -138,7 +138,8 @@ def summarize(rows: list[dict]) -> dict:
     verdicts = Counter(r["verdict"] for r in judged)
     correct = verdicts["correct"]
     mean = lambda key, items=rows: round(statistics.mean(r[key] for r in items), 1) if items else 0  # noqa: E731
-    with_judge_difficulty = [r for r in judged if r["judge_difficulty"] != ""]
+    # 评判偶尔没给出难度（null）：这几道不算进难度指标
+    with_judge_difficulty = [r for r in judged if isinstance(r["judge_difficulty"], int)]
     base = n - len(done) + len(judged)  # 可用率的分母：没出成的 + 出成且评过的（还没评判的题先不算）
     return {
         "n": n,
@@ -431,19 +432,44 @@ def estimate_full(rows: list[dict], names: list[str], workers: int = 10, judge_w
 HUMAN_VERDICTS = {"对": "对", "错": "错", "题目不成立": "题目不成立", "不成立": "题目不成立"}
 
 
+# "……对应选项B。""故选：AC""答案为 D" 这类句子里的选项字母；后面紧跟字母的（如"选项ABC三角形"）不算
+_CUE = re.compile(r"(?:对应选项|正确选项(?:为|是)?|故选|应选|选项|答案(?:为|是)|选)\s*[：:]?\s*"
+                  r"([A-H](?:\s*[,，、和与及]?\s*[A-H])*)(?![A-Za-z])")
+
+
 def _choice_letters(text: str) -> str:
-    """答案是选项字母时只取字母（"B（55.5）" → "B"）；夹着别的文字返回空串。"""
-    match = re.fullmatch(r"\s*(?:选\s*)?([A-H](?:\s*[,，、;；]?\s*[A-H])*)\s*(?:[（(].*)?", text or "", flags=re.DOTALL)
-    return "".join(sorted(set(re.findall(r"[A-H]", match.group(1))))) if match else ""
+    """答案是选项字母时只取字母："B（55.5）" → "B"，"第30百分位数为56，对应选项B。" → "B"；取不出来返回空串。"""
+    text = text or ""
+    # 字母打头，后面是括号或标点带的说明："B（55.5）""B，$-\frac{1}{7}$"
+    match = re.fullmatch(r"\s*(?:选\s*)?([A-H](?:\s*[,，、;；]?\s*[A-H])*)\s*(?:[（(，,：:；;].*)?", text, flags=re.DOTALL)
+    found = match.group(1) if match else ""
+    if not found:
+        cues = _CUE.findall(text)
+        found = cues[-1] if cues else ""
+    if not found:  # "A、C、D 正确，B 错误。"
+        right = re.search(r"([A-H](?:\s*[,，、和与及]?\s*[A-H])*)\s*(?:项|选项)?\s*正确", text)
+        found = right.group(1) if right else ""
+    return "".join(sorted(set(re.findall(r"[A-H]", found))))
+
+
+def _plain(text: str) -> str:
+    return re.sub(r"[\s$，,。．.]", "", text or "")
 
 
 def delivered_answer(question: dict) -> str:
-    """给人看的交付答案。选择题统一写成选项字母，免得各配置不同的写法透露出是哪一种。"""
-    if question.get("options"):
-        for text in (question.get("answer_value") or "", question.get("final_answer") or ""):
+    """给人看的交付答案。选择题统一写成选项字母，免得各配置不同的写法透露出是哪一种：
+    先从答案里找字母；找不到时看答案和哪个选项的内容一样（只写了数值的情况）。"""
+    texts = [question.get("answer_value") or "", question.get("final_answer") or ""]
+    options = question.get("options") or []
+    if options:
+        for text in texts:
             if _choice_letters(text):
                 return _choice_letters(text)
-    return question.get("final_answer") or question.get("answer_value") or ""
+        for text in texts:
+            same = [o["key"] for o in options if _plain(o.get("text")) and _plain(o.get("text")) == _plain(text)]
+            if len(same) == 1:
+                return same[0]
+    return texts[1] or texts[0]
 
 
 def _audit_filled(path) -> bool:
