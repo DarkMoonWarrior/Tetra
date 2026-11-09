@@ -8,9 +8,9 @@
 
 一句话出题、组卷、导出试卷。每道题都经过多个 AI 角色独立求解和交叉核对，通过了才交到你手上。
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![Version](https://img.shields.io/badge/version-0.1.0-555555)
+[![Download](https://img.shields.io/badge/download-Windows%20installer-0078D6?logo=windows&logoColor=white)](https://github.com/DarkMoonWarrior/Tetra/releases/latest) [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![Version](https://img.shields.io/badge/version-0.1.0-555555)
 
-[快速开始](#快速开始) · [功能](#功能) · [工作原理](#工作原理) · [使用手册](docs/user-guide.md) · [架构说明](docs/architecture.md) · [开发指南](docs/development.md)
+[下载与安装](#下载与安装) · [功能](#功能) · [工作原理](#工作原理) · [使用手册](docs/user-guide.md) · [架构说明](docs/architecture.md) · [开发指南](docs/development.md)
 
 </div>
 
@@ -137,23 +137,49 @@ flowchart LR
 
 技术栈：FastAPI、原生 JavaScript（无需构建）、KaTeX、SQLite。
 
-## 快速开始
+## 下载与安装
 
-### 桌面版（Windows）
+三种方式，功能完全一样：
 
-运行 `Tetra-Setup-<版本>.exe` 安装（可以选安装位置、桌面快捷方式和开机自启，在「设置 → 应用」里卸载），或者把 `Tetra-<版本>-windows-x64.zip` 解压到任意文件夹，双击 `Tetra.exe`：不用装 Python，也不用开终端。窗口用 Windows 自带的 Edge 内核打开；程序开着时，用任何浏览器访问 http://127.0.0.1:8765 也是同一个 Tetra。开机自启、快捷方式、导出文件存到哪、数据文件夹放哪，都在「个人设置 → 桌面版」里改。
+| 方式 | 适合 | 需要 |
+|---|---|---|
+| [安装版](#安装版推荐)（推荐） | 像装普通软件一样，开始菜单、桌面都有图标 | Windows 10 / 11（64 位） |
+| [免安装版](#免安装版) | 不想安装、放在 U 盘里、电脑上没有安装权限 | Windows 10 / 11（64 位） |
+| [从源码运行](#从源码运行) | 想看代码、改代码 | Python 3.10 及以上 |
 
-自己打包：见[开发指南](docs/development.md#打包桌面程序windows)。
+桌面版自带运行环境，不用装 Python，也不用开终端。另外都需要一个模型服务的 API Key（看图解题、识题要支持图片输入的模型）。
+
+### 安装版（推荐）
+
+1. 在 [Releases](https://github.com/DarkMoonWarrior/Tetra/releases/latest) 下载 `Tetra-Setup-0.1.0.exe`（约 47 MB）。
+2. 双击运行，按中文向导一步步选：
+   - **安装位置**：默认 `%LOCALAPPDATA%\Programs\Tetra`，点“浏览”可以换到任何文件夹；
+   - **安装给谁用**：只为自己安装（不需要管理员权限），或者为这台电脑的所有用户安装；
+   - **附加任务**：在桌面创建快捷方式（默认勾选）、开机时自动启动（默认不勾）。
+3. 装完勾上“现在打开 Tetra”，点“完成”。以后从开始菜单或桌面图标打开。
+
+> 第一次运行时 Windows 可能提示“Windows 已保护你的电脑”：程序还没有数字签名，点“更多信息”→“仍要运行”即可。
+
+- **升级**：直接运行新版本的安装程序，会装到原来的位置，题库和设置都保留。
+- **卸载**：Windows「设置 → 应用 → 已安装的应用」里找到“Tetra 命题智能体”。卸载时会问要不要连题库、设置一起删，默认保留，以后重新安装还能接着用。
+
+### 免安装版
+
+在 [Releases](https://github.com/DarkMoonWarrior/Tetra/releases/latest) 下载 `Tetra-0.1.0-windows-x64.zip`（约 60 MB），解压到任意文件夹，双击里面的 `Tetra.exe`。第一次打开会问要不要在桌面和开始菜单放快捷方式。不用了直接删掉这个文件夹。
+
+### 第一次使用
+
+1. 点左下角的头像 →「个人设置」→「模型服务」，选一个模板（DeepSeek、智谱 GLM、OpenAI、Claude），填上 API Key。不用改配置文件，也不用重启。
+2. 回到首页，用一句话说要求，比如“出一道考查椭圆离心率的单选题，难度中档”，或者“帮我组一套高一期中试卷”。
+
+### 桌面版的设置和网页端
+
+- **桌面版的设置**：「个人设置」→「桌面版」里可以改开机自动启动（可以只在任务栏里最小化）、桌面和开始菜单的快捷方式、导出的 Word / PDF 默认存到哪个文件夹（或者每次都问）、题库数据放在哪个文件夹。
+- **同时用网页端**：桌面版开着时，用任何浏览器打开 http://127.0.0.1:8765 也是同一个 Tetra，题库、对话都一样；左下角菜单里也有“在浏览器中打开”。
+- **关闭**：关掉窗口就退出；还有题在出、或者浏览器里还开着 Tetra 时，会在后台出完、等页面关了再退出，题不会出到一半丢掉。
+- 窗口用 Windows 自带的 Edge 内核显示，和你平时用的浏览器互不影响；导出 PDF 也用它。装了 Microsoft Word 时，导出的 Word 里公式是 Word 原生公式，可以直接改；没装 Word 时公式保留 LaTeX 写法。
 
 ### 从源码运行
-
-#### 环境要求
-
-- Python 3.10 及以上（目前在 Windows 11 上开发和测试）
-- 一个模型服务的 API Key；看图解题和识题需要支持图片输入的模型
-- 可选：Microsoft Word，用来生成 Word 原生公式；Edge 或 Chrome，用来导出 PDF
-
-#### 安装并运行
 
 ```bash
 git clone https://github.com/DarkMoonWarrior/Tetra.git
@@ -162,11 +188,17 @@ python -m pip install -e .
 tetra
 ```
 
-第一次运行时，`tetra` 会在项目里创建 `.venv` 并安装依赖，然后打开浏览器（http://127.0.0.1:8765）。
+第一次运行时，`tetra` 会在项目里创建 `.venv`、安装依赖，然后打开浏览器（http://127.0.0.1:8765）。以后在任意终端输入 `tetra` 就能启动；也可以双击 `启动命题智能体.bat`。目前在 Windows 11 上开发和测试。
 
-### 接入模型
+### 自己打包桌面版
 
-在页面上打开「个人设置 → 模型服务」，选一个模板，填上 API Key 就能用。不用改配置文件，也不用重启。
+```bash
+.venv\Scripts\python -m pip install pyinstaller
+winget install --id JRSoftware.InnoSetup -e --scope user
+.venv\Scripts\python packaging\build_windows.py
+```
+
+结果在 `dist/`：安装程序 `Tetra-Setup-<版本>.exe` 和免安装版 `Tetra-<版本>-windows-x64.zip`（没装 Inno Setup 时只出 zip）。详见[开发指南](docs/development.md#打包桌面程序windows)。
 
 ## 支持的模型服务
 
@@ -194,19 +226,25 @@ tetra
 **能多人一起用吗？**
 目前是单机应用，没有账号和权限控制，每个人在自己的电脑上运行，数据各自一份。
 
+**桌面版和从源码运行有什么区别？**
+是同一个程序。桌面版自带运行环境，用一个独立的窗口打开，还能设置开机自启、快捷方式和导出位置；从源码运行时用浏览器打开。两者的数据默认分开存放（见下面的“数据与隐私”）。
+
+**换电脑时怎么带走题库？**
+关掉 Tetra，把数据文件夹整个复制到新电脑的同一位置。桌面版也可以先在「个人设置 → 桌面版」里把数据文件夹换到别的磁盘或 U 盘，到新电脑上再选回这个文件夹。
+
 ## 数据与隐私
 
 - 服务只监听 `127.0.0.1`，不对外开放。
-- 题库、试卷、个人设置和 API Key 都保存在本机的 `data/runtime/`，不进版本库。
+- 题库、试卷、对话、个人设置和 API Key 都只保存在本机：桌面版默认在 `%LOCALAPPDATA%\Tetra\data`（可以在设置里换位置），从源码运行时在项目的 `data/runtime/`，都不进版本库，安装包里也不带。
 - 出题、聊天和识题时，你的要求和附件会发给你接入的模型服务。
 
 ## 文档
 
 | 文档 | 内容 |
 |---|---|
-| [使用手册](docs/user-guide.md) | 启动选项、模型配置、出题、组卷、识题和各项设置 |
+| [使用手册](docs/user-guide.md) | 桌面版的安装和设置、启动选项、模型配置、出题、组卷、识题和各项设置 |
 | [架构说明](docs/architecture.md) | 系统结构、出题流水线、项目目录和 API 概览 |
-| [开发指南](docs/development.md) | 本地开发、界面翻译、运行数据和专题识别模型 |
+| [开发指南](docs/development.md) | 本地开发、打包桌面版和安装程序、界面翻译、运行数据和专题识别模型 |
 
 ## 参与贡献
 
