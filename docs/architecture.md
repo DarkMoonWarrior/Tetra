@@ -11,8 +11,8 @@ Tetra 是一个本机运行的 Web 应用：后端是 FastAPI，前端是不需�
   │  REST + 轮询进度
   ▼
 FastAPI  mingti/server.py
-  ├─ 对话助手    assistant.py ── 分流：聊天 / 出题 / 组卷 / 存题；前文由 context.py 整理
-  ├─ 出题任务    jobs.py → team.py → question_authoring/（命题流水线）
+  ├─ 对话助手    assistant.py ── 分流：聊天 / 出题 / 组卷 / 存题 / 整理题库（organize.py）；前文由 context.py 整理
+  ├─ 出题任务    jobs.py → team.py → question_authoring/（命题流水线）；几个对话的任务同时跑（默认最多 8 道）
   │              └─ figures.py 配图、answer_key.py 整理解析
   ├─ 自动组卷    assemble.py ── 从 bank.py 挑题，缺的交给 jobs.py 现场出
   ├─ 识题导入    importer.py ── 附件由 attachments.py 暂存
@@ -70,11 +70,12 @@ FastAPI  mingti/server.py
 | 路径 | 内容 |
 |---|---|
 | `mingti/server.py` | Web 接口（FastAPI） |
-| `mingti/assistant.py` | 对话助手：判断一句话是聊天、出题、组卷还是存题；聊天直接回答，看图解题 |
+| `mingti/assistant.py` | 对话助手：判断一句话是聊天、出题、组卷、存题还是整理题库；聊天直接回答，看图解题 |
+| `mingti/organize.py` | 整理题库：模型按老师的话写出文件夹操作（建、改名、挪、删，按编号或条件挑题），程序检查后执行，记下撤销办法 |
 | `mingti/context.py` | 对话的上下文：按 Token 预算整理前文、估算用量、压缩成摘要 |
 | `mingti/assemble.py` | 自动组卷：定方案、从题库挑题、现场出题补缺、组成试卷 |
 | `mingti/attachments.py` | 聊天附件的暂存（内存里，4 小时），PDF 按页渲染成图片 |
-| `mingti/importer.py` | 识题导入：逐页识别题目、接上跨页内容、截配图、补写解析 |
+| `mingti/importer.py` | 识题导入：逐页识别题目、接上跨页内容、截配图（照片按模型给的位置截，再对准图上的墨迹）、补写解析；也能从对话里把讨论过的题和解答整理出来 |
 | `mingti/question_authoring/` | 命题核心：多阶段提示词流程（`providers.py`）与规则检查（`authoring.py`） |
 | `mingti/team.py` | 多智能体：方案并行、按角色指定模型、审核意见上报、独立验算员 |
 | `mingti/jobs.py` `mingti/tracking.py` | 后台出题任务和实时进度，每次模型调用的记录 |
@@ -82,7 +83,7 @@ FastAPI  mingti/server.py
 | `mingti/answer_key.py` | 整理员：把完整推导改写成标准答案式的解析 |
 | `mingti/figures.py` `mingti/figlib.py` | 配图员与绘图库（斜二测立体图、函数图象、统计图） |
 | `mingti/topic_model.py` | 专题识别：没指定考点的题，给题目选知识点时只交出所属专题的知识点（见“出题流水线”） |
-| `mingti/bank.py` | 题库和试卷的存储 |
+| `mingti/bank.py` | 题库、文件夹和试卷的存储 |
 | `mingti/export.py` | 试卷的打印页、Word 导出（LaTeX 转 Word 公式）和 PDF 导出 |
 | `mingti/store.py` | 命题记录、对话消息、对话的置顶和名称 |
 | `mingti/deepseek.py` `mingti/claude.py` | 模型调用：兼容 OpenAI 的接口（含 JSON 修复）、Anthropic SDK |
@@ -104,10 +105,12 @@ FastAPI  mingti/server.py
 |---|---|
 | 对话 | `POST /api/assistant`；`GET /api/sessions`、`GET /api/sessions/{id}`；`POST /api/sessions/{id}/rename`、`/pin`；`DELETE /api/sessions/{id}` |
 | 上下文 | `GET /api/sessions/{id}/context`、`POST /api/sessions/{id}/compress` |
-| 附件与识题 | `POST /api/uploads`、`POST /api/chat-imports`、`POST /api/messages/{id}/import` |
+| 附件与识题 | `POST /api/uploads`、`POST /api/chat-imports`（不带附件时从对话里整理）、`POST /api/messages/{id}/import` |
+| 整理题库 | 由 `POST /api/assistant` 当场做完；撤销：`POST /api/messages/{id}/undo` |
 | 出题 | `POST /api/jobs`、`GET /api/jobs/{id}`、`POST /api/jobs/{id}/stop`；一次出几道：`/api/batches` |
 | 组卷 | `POST /api/assemblies`、`GET /api/assemblies/{id}`、`POST /api/assemblies/{id}/stop` |
 | 题库 | `GET/POST /api/bank`、`GET/PUT /api/bank/{id}`、`POST /api/bank/delete`、`POST /api/bank/{id}/figure`、`/tidy`；导入：`/api/imports` |
+| 文件夹 | `GET/POST /api/bank/folders`、`PATCH/DELETE /api/bank/folders/{id}`、`POST /api/bank/move` |
 | 试卷 | `GET/POST /api/papers`、`GET/PUT/DELETE /api/papers/{id}`、`GET /api/papers/{id}/print`、`/export` |
 | 设置与模型 | `GET/PATCH /api/profile`、`POST /api/profile/reset`、`GET /api/profile/export`；`/api/model-services`、`GET /api/models` |
 | 其他 | `GET /api/health`、`/api/curriculum`、`/api/blueprints`、`/api/counts`、`/api/questions` |

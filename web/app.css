@@ -1466,5 +1466,52 @@ body.rail-collapsed .thread-scroll { padding-top: 60px; }
 .service-more .field:last-child { border-bottom: 0; }
 .service-form > .service-actions { margin-top: 12px; }
 .hero-alert .link-btn { margin-left: 8px; color: inherit; }
-.view-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.view-title h1 { margin: 0 0 6px; }
+.view-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.view-title h1 { margin: 0 auto 6px 0; }
+
+/* 题库的文件夹条：所在位置（全部题目 › 期中复习 › 函数），下一行是下一层的文件夹 */
+.folder-bar { display: grid; gap: 8px; margin: 0 0 14px; }
+.folder-path { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-height: 30px; font-size: 14px; }
+.folder-crumb { max-width: 16em; padding: 4px 8px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.folder-crumb:hover { background: var(--hover); color: var(--ink); }
+.folder-crumb.on { color: var(--ink); font-weight: 600; }
+.folder-sep { color: var(--ink-3); padding: 0 1px; }
+.folder-more { width: 28px; height: 28px; margin-left: 2px; border: 0; border-radius: 8px; background: none; color: var(--ink-3); display: grid; place-items: center; cursor: pointer; }
+.folder-more svg { width: 16px; height: 16px; }
+.folder-more:hover, .folder-more[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
+.folder-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.folder-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 220px; height: 32px; padding: 0 11px;
+  border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--ink);
+  font-size: 13.5px; cursor: pointer; transition: border-color 0.12s, background 0.12s;
+}
+.folder-chip svg { width: 15px; height: 15px; flex: none; color: var(--ink-3); }
+.folder-chip:hover { border-color: var(--ink); }
+.folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-count { font: 12px/1 var(--font-num); color: var(--ink-3); }
+.folder-chip.loose { border-style: dashed; }
+.folder-chip.loose.empty .folder-count { opacity: 0.6; }
+.folder-chip.add { border-style: dashed; color: var(--ink-2); }
+.folder-chip.add:hover { color: var(--ink); }
+.folder-chip.naming { padding: 0 4px; border-color: var(--ink); cursor: text; }
+.folder-input { width: 150px; height: 26px; padding: 0 6px; border: 0; outline: none; background: transparent; color: var(--ink); font: inherit; font-size: 13.5px; }
+/* 拖着题（或文件夹）经过可以放下的地方 */
+.folder-chip.drop, .folder-crumb.drop { border-color: var(--ink); background: var(--active); color: var(--ink); }
+.bank-row.dragging { opacity: 0.45; }
+.bank-meta .folder-tag { display: inline-flex; align-items: center; gap: 4px; max-width: 12em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-2); }
+.bank-meta .folder-tag svg { width: 13px; height: 13px; flex: none; }
+/* 移到文件夹的菜单：文件夹多时可以滚动，最下面可以新建一个再移进去 */
+.bank-menu.move-menu { width: 280px; max-width: calc(100vw - 16px); }
+.move-list { max-height: 46vh; overflow: auto; }
+.move-list .rail-menu-item:disabled { opacity: 0.45; cursor: default; background: none; }
+.move-new { display: flex; gap: 6px; margin: 6px 4px 2px; padding-top: 8px; border-top: 1px solid var(--line); }
+.move-new .folder-input { flex: 1; min-width: 0; width: auto; height: 32px; border: 1px solid var(--line-strong); border-radius: 8px; }
+.move-new .folder-input:focus { border-color: var(--ink); }
+.move-new .btn { white-space: nowrap; }
+
+/* 对话里整理题库的结果：做了哪些改动 */
+.organize-changes { margin: 10px 0 0; padding: 0 0 0 1.2em; font-size: 14px; line-height: 1.75; color: var(--ink-2); }
+.organize-changes.undone { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--line-strong); }
+/* 存题核对卡片：存到哪个文件夹 */
+.import-folder { display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; font-size: 13.5px; color: var(--ink-2); }
+.import-folder .select-input { width: auto; max-width: 220px; height: 34px; }

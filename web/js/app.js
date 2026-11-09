@@ -12,6 +12,7 @@ import { BatchItemSource, BatchTurn, shownLane } from './batch.js';
 import { ChatTurn, SummaryTurn, kilo } from './chat.js';
 import { PaperTurn } from './assembly.js';
 import { ImportTurn, importRecord } from './importcard.js';
+import { OrganizeTurn } from './organize.js';
 import { setGeometryBusy, startGeometry } from './geometry.js';
 import { isDark } from './theme.js';
 import { language, startI18n } from './i18n.js';
@@ -23,7 +24,8 @@ import {
 } from './settings.js';
 
 const FORM_KEY = 'mingti.form.v4'; // v4：出题选项默认不选（null），旧版存的选择不再沿用
-const JOB_KEY = 'mingti.job.v3';
+const JOBS_KEY = 'mingti.jobs.v1'; // 正在进行的任务（可以有好几个，各在各的对话里）
+const OLD_JOB_KEY = 'mingti.job.v3'; // 以前同一时间只有一个任务时存的
 const CHAT_KEY = 'mingti.chat';
 const RAIL_KEY = 'mingti.rail-collapsed';
 // 起始页输入框里的示例：每次打开起始页随机换一条，不和上次一样
@@ -89,14 +91,13 @@ const state = {
   mode: 'idle',
   chat: null, // 当前打开的对话 { id, turns }
   focus: null, // 右栏正在显示哪一轮
-  job: null, // 正在出的题 { id, chat, batch, paper }，同一时间只出一道（或一批、一份试卷）
-  pending: null, // 正在等助手回答的那句话 { turn, chat }
+  // 正在进行的任务：任务编号 → { id, chat, batch, paper, import, count, snapshot, snapshotAt, timer }。
+  // 几个对话可以同时出题（一个对话里也可以接着再出），各自轮询进度；按开始的先后排
+  jobs: new Map(),
+  pendings: new Map(), // 正在等助手回答的话：对话编号 → { turn, chat, text }（每个对话一次一句）
   touched: false, // 上次发送以后，在输入框下方调过题型、难度这些出题选项
   context: null, // 当前对话带给模型的前文有多长（/api/sessions/{id}/context）
   attachments: [], // 输入框里准备发的附件 { key, name, kind, status, id, thumb, pages }
-  liveSnapshot: null,
-  snapshotAt: 0,
-  pollTimer: null,
   replay: null, // { turn, timer }
   revealed: new Set(),
   sessions: [],
@@ -409,16 +410,71 @@ function refreshComposer() {
   if (many) ui.taskLine.append(document.createTextNode('每道题单独出、单独审核，互不重复。'));
   if (openTopic) ui.taskLine.append(document.createTextNode('考点不限，会在这个年级的范围里挑一个。'));
   if (settingsConstraints().length) ui.taskLine.append(document.createTextNode('另附个人设置里的要求。'));
-  // 出题时也能接着聊天；只有在等助手回答上一句时不能发
-  ui.send.disabled = !state.models.length || Boolean(state.pending);
+  // 出题时也能接着聊天、接着出下一道，也可以开新对话同时出；只有这个对话在等助手回答上一句时不能发
+  const waiting = openPending();
+  ui.send.disabled = !state.models.length || Boolean(waiting);
   // 要发的内容不再单独占一行，鼠标停在发送按钮上能看到
   const typed = ui.prompt.value.trim();
   ui.send.title = !state.models.length ? '还没有可用的模型'
-    : state.pending ? '上一句还在回答'
+    : waiting ? '上一句还在回答'
       : state.attachments.length ? '发送：看附件里的内容回答（比如解题），或者把里面的题存进题库'
         : typed ? '发送：要出题就出题，要组卷就组卷，其他的直接回答'
-        : state.job ? '上一道题还在出' : `按下面的设置出题：${ui.taskLine.textContent.replace(/^将发送：/, '')}`;
+          : `按下面的设置出题：${ui.taskLine.textContent.replace(/^将发送：/, '')}`;
   scheduleFit();
+}
+
+// ---------- 正在进行的任务：几个对话可以同时出题，各自轮询 ----------
+
+// 当前打开的对话里在等回答的那句话（没有就是 null）
+function openPending() {
+  return state.mode === 'chat' && state.chat ? state.pendings.get(state.chat.id) || null : null;
+}
+
+function chatJobs(chatId) {
+  return [...state.jobs.values()].filter((entry) => entry.chat === chatId);
+}
+
+// 这个对话里还有题在出（或者组卷、识别题目），或者有一句在等回答
+function chatBusy(chatId) {
+  return chatJobs(chatId).length > 0 || state.pendings.has(chatId);
+}
+
+// 刷新页面以后接着看进度：只存编号和种类，快照重新读
+function saveJobs() {
+  const list = [...state.jobs.values()].map((entry) => ({
+    id: entry.id, chat: entry.chat, batch: entry.batch, paper: entry.paper, import: entry.import, count: entry.count, title: entry.title,
+  }));
+  writeStorage(sessionStorage, JOBS_KEY, list.length ? list : null);
+}
+
+// 这个任务在对话里的那一轮：只有它所在的对话正打开着才有
+function turnFor(entry) {
+  if (!entry || !state.chat || state.chat.id !== entry.chat) return null;
+  return state.chat.turns.find((turn) => turn.jobId === entry.id) || null;
+}
+
+const isLive = (turn) => Boolean(turn?.jobId && state.jobs.has(turn.jobId));
+
+function updateBusy() {
+  setGeometryBusy(state.jobs.size > 0 || Boolean(state.replay));
+}
+
+// 对话的名字（提示"哪个对话里的题出好了"时用）
+function chatName(chatId) {
+  const session = state.sessions.find((one) => one.id === chatId);
+  return session ? sessionTitle(session) : '';
+}
+
+// 不在眼前的对话里有任务开始或结束了：提示里带上是哪个对话（还没有名字的新对话用你说的那句话）
+function notify(chatId, text, fallback = '') {
+  const away = !(state.mode === 'chat' && state.chat?.id === chatId);
+  const name = away ? chatName(chatId) || String(fallback || '').replace(/\s+/g, ' ').slice(0, 24) : '';
+  toast(name ? `「${name}」${text}` : text);
+}
+
+// 任务结束：先刷新对话列表（新对话这时才有名字），再提示
+function announce(chatId, text, fallback = '') {
+  loadSessions().finally(() => notify(chatId, text, fallback));
 }
 
 // ---------- 输入框下方那一排：放不下一行时逐级收紧 ----------
@@ -868,7 +924,7 @@ function setContext(stats, chatId) {
 // 自动压缩：只在超额时压（服务端再确认一次）；压完对话里排进"已压缩"的分界线
 let autoCompressing = null;
 async function autoCompress(chatId) {
-  if (!chatId || autoCompressing === chatId || state.pending?.chat === chatId || !state.models.length) return;
+  if (!chatId || autoCompressing === chatId || state.pendings.has(chatId) || !state.models.length) return;
   autoCompressing = chatId;
   try {
     const data = await request(`/api/sessions/${encodeURIComponent(chatId)}/compress`, {
@@ -880,7 +936,7 @@ async function autoCompress(chatId) {
       return;
     }
     // 这个对话里正在出题时不重排（重新打开会打断进度的显示），只更新用量；下次打开就能看到分界线
-    if (state.chat?.id === chatId && state.job?.chat !== chatId && !state.pending) await openChat(chatId, { quiet: true });
+    if (state.chat?.id === chatId && !chatBusy(chatId)) await openChat(chatId, { quiet: true });
     else if (state.chat?.id === chatId) state.context = data.context;
     renderContext();
     toast(`上下文超额，已自动把前面 ${data.summary.covers_count} 轮压缩成摘要`);
@@ -1264,7 +1320,8 @@ const paperActions = {
     setMode('papers');
     await papers.show(turn.paper.id);
   },
-  again: (turn) => startAssembly(turn.snapshot?.text || ''),
+  // source：'original' 是"全部换成新题"（同样的要求再组一次，题目全部现场出）
+  again: (turn, source = 'auto') => startAssembly(turn.snapshot?.text || '', null, source),
 };
 
 // 右栏显示试卷里的第 no 题：挑好、出好的按题库里的题显示，正在现场出的读那道题的实时进度
@@ -1426,10 +1483,6 @@ const oneLine = (text) => String(text || '').replace(/\$\$/g, '$').replace(/\s*\
 
 // 再出一批：同样的要求，避开这一批已经出好的题
 function batchAgain(turn) {
-  if (state.job) {
-    toast('上一批题还在出，等它结束或先停止');
-    return;
-  }
   const { brief = {}, meta = {}, config = {} } = turn.request || {};
   loadBrief(brief, meta, config);
   state.form.count = turn.count;
@@ -1483,7 +1536,10 @@ function addChatTurn(text, attachments = []) {
 // 把附件里的题存进题库的那一轮（核对卡片）
 const importActions = {
   stop: (turn) => stopJob(turn),
-  openBank: () => openBank(),
+  openBank: (turn, folderId = null) => {
+    setMode('bank');
+    library.show(null, { folder: folderId });
+  },
   saved: (turn, data) => {
     setCounts(data.counts);
     loadSessions();
@@ -1495,17 +1551,24 @@ function addImportTurn() {
   return appendTurn(new ImportTurn(importActions));
 }
 
+// 整理题库那一轮的按钮：到题库里看整理好的文件夹，或者撤销这次整理
+const organizeActions = {
+  openFolder: (turn, folderId) => {
+    setMode('bank');
+    library.show(null, { folder: folderId });
+  },
+  undone: () => {
+    loadContext(state.chat?.id);
+    toast('已撤销：题库恢复成整理之前的样子');
+  },
+};
+
 function addPaperTurn() {
   return appendTurn(new PaperTurn(paperActions));
 }
 
-function liveTurn() {
-  if (!state.job || !state.chat) return null;
-  return state.chat.turns.find((turn) => turn.jobId === state.job.id) || null;
-}
-
 function renderTurn(turn, { animate = true, replaying = false } = {}) {
-  turn.render({ live: turn === liveTurn(), replaying });
+  turn.render({ live: isLive(turn), replaying });
   if (state.focus === turn) renderSheet(turn, { animate });
 }
 
@@ -1814,11 +1877,11 @@ function matchTopic(text) {
 // 出题、组卷、存题就换成出题（组卷、核对题目）的那一轮。files：带着的附件（重试时用那一轮原来的附件）
 async function converse(text, retryTurn = null, files = null) {
   const attachments = files || retryTurn?.attachments || [];
-  if (state.pending) {
+  const chatId = retryTurn && state.chat ? state.chat.id : state.mode === 'chat' && state.chat ? state.chat.id : newChatId();
+  if (state.pendings.has(chatId)) {
     toast('上一句还在回答，等它答完再发');
     return;
   }
-  const chatId = retryTurn && state.chat ? state.chat.id : state.mode === 'chat' && state.chat ? state.chat.id : newChatId();
   if (!state.chat || state.chat.id !== chatId) resetChat(chatId);
   writeStorage(sessionStorage, CHAT_KEY, chatId);
   const turn = retryTurn || addChatTurn(text, attachments);
@@ -1833,7 +1896,7 @@ async function converse(text, retryTurn = null, files = null) {
     state.attachments = state.attachments.filter((item) => !attachments.includes(item));
     renderAttachments();
   }
-  state.pending = { turn, chat: chatId, text: text || attachments.map((item) => item.name).join('、') };
+  state.pendings.set(chatId, { turn, chat: chatId, text: text || attachments.map((item) => item.name).join('、') });
   setMode('chat');
   scrollToBottom();
   refreshComposer();
@@ -1866,22 +1929,34 @@ async function converse(text, retryTurn = null, files = null) {
       }),
     });
   } catch (error) {
-    state.pending = null;
+    state.pendings.delete(chatId);
     turn.fail(error.message);
     refreshComposer();
+    renderSessions();
     return;
   }
-  state.pending = null;
+  state.pendings.delete(chatId);
   refreshComposer();
   setContext(answer.context, chatId);
+  const here = state.mode === 'chat' && state.chat?.id === chatId;
   if (answer.intent === 'chat') {
     turn.show(answer.message);
-    if (state.chat?.id === chatId) scrollToBottom();
+    if (here) scrollToBottom();
     loadSessions();
+  } else if (answer.intent === 'organize') {
+    // 整理题库当场做完了：这一轮换成整理的结果（做了哪些改动，可以撤销）
+    const done = new OrganizeTurn(organizeActions, answer.message);
+    if (here && turn.root.isConnected) {
+      turn.root.replaceWith(done.root);
+      state.chat.turns = state.chat.turns.map((other) => (other === turn ? done : other));
+      scrollToBottom();
+    }
+    loadSessions();
+    notify(chatId, answer.message.status === 'done' ? '题库整理好了' : '这次没有改动题库');
   } else {
     removeTurn(turn);
     if (answer.intent === 'paper') await startAssembly(text, chatId);
-    else if (answer.intent === 'import') await startChatImport(text, attachments, chatId);
+    else if (answer.intent === 'import') await startChatImport(text, answer.source === 'conversation' ? [] : attachments, chatId, answer.folder);
     else {
       const settings = answer.generate || {};
       applyGenerate(settings);
@@ -1896,12 +1971,9 @@ async function converse(text, retryTurn = null, files = null) {
   }
 }
 
-// 把附件里的题存进题库：识别题目，没有解析的补写解析，做成核对卡片，确认后才存（见后端 importer.py）
-async function startChatImport(text, files, chatId) {
-  if (state.job) {
-    toast('上一道题还在出，等它出完（或先停止）再存题');
-    return;
-  }
+// 把题存进题库：附件里的题逐页识别；没带附件就从前文里把讨论过、解过的题整理出来（见后端 importer.py）。
+// 没有解析的补写解析，做成核对卡片，确认后才存。folder：用户说了存到哪个文件夹（核对卡片上预先选好）
+async function startChatImport(text, files, chatId, folder = null) {
   try {
     const snap = await request('/api/chat-imports', {
       method: 'POST',
@@ -1912,22 +1984,19 @@ async function startChatImport(text, files, chatId) {
         model: mainModel()?.id || null,
         thinking: THINKING[state.form.thinking] ? state.form.thinking : 'medium',
         edition: profile().textbook || 'pep_a',
+        folder: folder || null,
       }),
     });
-    startLive(snap.id, snap.session_id || chatId, { import: true, snapshot: snap });
+    startLive(snap.id, snap.session_id || chatId, { import: true, snapshot: snap }, { reveal: false, title: text || '存题' });
   } catch (error) {
-    toast(`没能开始识别：${error.message}`);
+    notify(chatId, `没能开始整理题目：${error.message}`);
   }
 }
 
-// 自动组卷：按这句话定方案、从题库挑题，不够的现场出题（见后端 assemble.py）
-async function startAssembly(text, chatId = null) {
+// 自动组卷：按这句话定方案、从题库挑题（或者全部现场出新题），不够的现场出题（见后端 assemble.py）。
+// source：题目从哪来，auto 按这句话判断；"全部换成新题"时是 original
+async function startAssembly(text, chatId = null, source = 'auto') {
   if (!text) return;
-  if (state.job) {
-    toast('上一道题还在出，等它出完（或先停止）再组卷');
-    restorePrompt(text);
-    return;
-  }
   const p = profile();
   const id = chatId || (state.mode === 'chat' && state.chat ? state.chat.id : newChatId());
   const config = {
@@ -1937,27 +2006,22 @@ async function startAssembly(text, chatId = null) {
   try {
     const snap = await request('/api/assemblies', {
       method: 'POST',
-      body: JSON.stringify({ text, session_id: id, config, meta: { edition: p.textbook || 'pep_a', detail: p.defaults.solution_detail } }),
+      body: JSON.stringify({ text, session_id: id, config, source, meta: { edition: p.textbook || 'pep_a', detail: p.defaults.solution_detail } }),
     });
     state.touched = false;
-    startLive(snap.id, snap.session_id || id, { paper: true, snapshot: snap });
+    startLive(snap.id, snap.session_id || id, { paper: true, snapshot: snap }, { reveal: !chatId, title: text });
   } catch (error) {
-    toast(`没能开始组卷：${error.message}`);
-    restorePrompt(text);
+    notify(id, `没能开始组卷：${error.message}`);
+    if (!chatId || state.chat?.id === chatId) restorePrompt(text);
   }
 }
 
 // ---------- 出题 ----------
 
-// 在对话里发出的要求接在这个对话后面；在起始页发出的开一个新对话。
-// note：助手判断是出题的那句话（输入框已经清空）；chatId：那句话所在的对话
+// 在对话里发出的要求接在这个对话后面；在起始页发出的开一个新对话。别的对话里正在出题也不影响：各出各的。
+// note：助手判断是出题的那句话（输入框已经清空）；chatId：那句话所在的对话（回答回来时你可能已经换到别的对话了）
 async function startGeneration(options = {}) {
   const given = options.note !== undefined;
-  if (state.job) {
-    toast('上一道题还在出，等它结束或先停止');
-    if (given) restorePrompt(options.said || options.note);
-    return;
-  }
   const payload = composeRequest(options);
   const chatId = options.chatId || (state.mode === 'chat' && state.chat ? state.chat.id : newChatId());
   payload.meta.session_id = chatId;
@@ -1969,17 +2033,17 @@ async function startGeneration(options = {}) {
     const job = count > 1
       ? await request('/api/batches', { method: 'POST', body: JSON.stringify({ ...body, count }) })
       : await request('/api/jobs', { method: 'POST', body: JSON.stringify(body) });
-    // 像聊天一样，发出去以后输入框清空；题型、难度这些选择留着，接着出下一道
+    // 像聊天一样，发出去以后输入框清空
     if (!given) {
       ui.prompt.value = '';
       autosize();
-      saveForm();
     }
     state.touched = false;
-    startLive(job.id, job.session_id || chatId, count > 1 ? { count, request: body } : null);
-    // 记下发出时的出题选项：题出完以后，没再动过就恢复成不选
-    state.job.chips = chipState();
-    writeStorage(sessionStorage, JOB_KEY, state.job);
+    // 选的题型、难度这些只管这一次：发出去就恢复成不选。别的对话（或者接着在这里）出下一道时不会沿用，
+    // 这一道用的设置写在它的任务卡片上
+    clearChips();
+    const title = options.said || payload.meta.note || (payload.meta.knowledge_label || '').split(' › ').pop() || '';
+    startLive(job.id, job.session_id || chatId, count > 1 ? { count, request: body } : null, { reveal: !options.chatId, title });
   } catch (error) {
     toast(`没能开始：${error.message}`);
     if (given) restorePrompt(options.said || options.note);
@@ -1991,10 +2055,6 @@ async function startGeneration(options = {}) {
 function followUp(turn, kind) {
   const snap = turn.snapshot;
   if (!snap) return;
-  if (state.job) {
-    toast('上一道题还在出，等它结束或先停止');
-    return;
-  }
   loadBrief(snap.brief || {}, snap.meta || {}, snap.config || {});
   // 那道题是"考点不限"出的：接着出时沿用它实际考的知识点，不然"难一点""换个情境"会换成别的考点
   if (!state.form.topic && !ui.prompt.value.trim() && snap.result?.curriculum?.node_id) {
@@ -2056,65 +2116,72 @@ function loadBrief(brief, meta, config) {
   autosize();
 }
 
-// extra：批量出题时是 { count, request }，正在出的是一整批（state.job.batch 为 true）；
-// 自动组卷时是 { paper: true, snapshot }（state.job.paper 为 true）
-function startLive(jobId, chatId, extra = null) {
+// 开始跟踪一个任务（一道题、一批题、一次组卷，或者识别题目存进题库）。
+// extra：批量出题时是 { count, request }；自动组卷时是 { paper: true, snapshot }；存题时是 { import: true, snapshot }。
+// reveal：这个对话没打开时要不要切过去（从起始页、当前对话直接发起的要切；助手回答回来时你已经换到别处了就不切，
+// 任务照样在后台跑，侧栏标着"正在出题"，点开那个对话就能看到进度）
+// title：这件事的简短说法（你说的话或者考点），侧栏里还没有名字的新对话、不在眼前的提示里用
+function startLive(jobId, chatId, extra = null, { reveal = true, title = '' } = {}) {
   const paper = Boolean(extra?.paper);
   const imports = Boolean(extra?.import);
   const batch = !paper && !imports && Boolean(extra?.count);
-  state.job = { id: jobId, chat: chatId, batch, paper, import: imports, count: extra?.count || 1 };
-  state.liveSnapshot = paper || imports ? extra.snapshot : null;
-  state.snapshotAt = performance.now();
-  writeStorage(sessionStorage, JOB_KEY, state.job);
-  if (!state.chat || state.chat.id !== chatId) resetChat(chatId);
-  writeStorage(sessionStorage, CHAT_KEY, chatId);
-  const turn = imports ? addImportTurn() : paper ? addPaperTurn() : batch ? addBatchTurn() : addTurn();
-  turn.jobId = jobId;
-  if (imports) {
-    turn.snapshot = extra.snapshot;
-    turn.render({ live: true });
+  const entry = {
+    id: jobId, chat: chatId, batch, paper, import: imports, count: extra?.count || 1,
+    title: String(title || '').replace(/\s+/g, ' ').trim().slice(0, 40),
+    snapshot: paper || imports ? extra.snapshot : null, snapshotAt: performance.now(), timer: null,
+  };
+  state.jobs.set(jobId, entry);
+  saveJobs();
+  const open = state.mode === 'chat' && state.chat?.id === chatId;
+  if (open || reveal) {
+    if (!state.chat || state.chat.id !== chatId) resetChat(chatId);
+    writeStorage(sessionStorage, CHAT_KEY, chatId);
+    const turn = imports ? addImportTurn() : paper ? addPaperTurn() : batch ? addBatchTurn() : addTurn();
+    turn.jobId = jobId;
+    if (imports || paper) {
+      turn.snapshot = extra.snapshot;
+      turn.render({ live: true });
+    }
+    if (batch) {
+      turn.batchId = jobId;
+      turn.count = extra.count;
+      turn.request = extra.request;
+      turn.render({ live: true });
+    }
+    setMode('chat');
+    // 单独一道题马上在右栏显示进度；一批题等第一道写出题干；组卷等整份试卷组好；存题的核对卡片在对话里
+    if (!batch && !paper && !imports) focusTurn(turn);
+    scrollToBottom();
+  } else {
+    notify(chatId, paper ? '开始组卷了' : imports ? '开始整理要存的题了' : '开始出题了', entry.title);
   }
-  if (batch) {
-    turn.batchId = jobId;
-    turn.count = extra.count;
-    turn.request = extra.request;
-    turn.render({ live: true });
-  }
-  if (paper) {
-    turn.snapshot = extra.snapshot;
-    turn.render({ live: true });
-  }
-  setMode('chat');
-  // 单独一道题马上在右栏显示进度；一批题等第一道写出题干；组卷等整份试卷组好；存题的核对卡片在对话里
-  if (!batch && !paper && !imports) focusTurn(turn);
-  scrollToBottom();
-  setGeometryBusy(true);
+  updateBusy();
   refreshComposer();
   renderSessions();
-  poll();
+  poll(jobId);
 }
 
-async function poll() {
-  clearTimeout(state.pollTimer);
-  if (!state.job) return;
-  const jobId = state.job.id;
-  const { batch, paper } = state.job;
-  const imports = state.job.import;
+const pollUrl = (entry) => (entry.import ? `/api/imports/${entry.id}` : entry.paper ? `/api/assemblies/${entry.id}`
+  : entry.batch ? `/api/batches/${entry.id}` : `/api/jobs/${entry.id}`);
+
+async function poll(jobId) {
+  const entry = state.jobs.get(jobId);
+  if (!entry) return;
+  clearTimeout(entry.timer);
   try {
-    const url = imports ? `/api/imports/${jobId}` : paper ? `/api/assemblies/${jobId}` : batch ? `/api/batches/${jobId}` : `/api/jobs/${jobId}`;
-    const snap = await request(url);
-    if (state.job?.id !== jobId) return;
-    state.liveSnapshot = snap;
-    state.snapshotAt = performance.now();
-    const turn = liveTurn();
+    const snap = await request(pollUrl(entry));
+    if (state.jobs.get(jobId) !== entry) return;
+    entry.snapshot = snap;
+    entry.snapshotAt = performance.now();
+    const turn = turnFor(entry);
     if (turn) {
       turn.snapshot = snap;
-      if (imports) {
+      if (entry.import) {
         turn.render({ live: true });
-      } else if (paper) {
+      } else if (entry.paper) {
         turn.render({ live: true });
         refreshSlot(turn);
-      } else if (batch) {
+      } else if (entry.batch) {
         turn.count = snap.count;
         turn.request = turn.request || { brief: snap.brief, meta: snap.meta, config: snap.config };
         turn.render({ live: true });
@@ -2126,14 +2193,14 @@ async function poll() {
       }
     }
     if (snap.status === 'queued' || snap.status === 'running') {
-      state.pollTimer = setTimeout(poll, batch || paper || imports ? 1200 : 700);
+      entry.timer = setTimeout(() => poll(jobId), entry.batch || entry.paper || entry.import ? 1200 : 700);
     } else {
-      finishLive(snap);
+      finishLive(entry, snap);
     }
   } catch (error) {
     if (/任务不存在/.test(error.message)) {
       // 服务重启过，进行中的题丢了：把这一轮拿掉
-      const turn = liveTurn();
+      const turn = turnFor(entry);
       if (turn && !turn.snapshot) {
         removeTurn(turn);
       } else if (turn?.isPaper) {
@@ -2144,42 +2211,48 @@ async function poll() {
       } else if (turn) {
         turn.jobId = null;
       }
-      state.job = null;
-      writeStorage(sessionStorage, JOB_KEY, null);
-      setGeometryBusy(false);
+      dropJob(entry);
       refreshComposer();
       renderSessions();
       return;
     }
-    state.pollTimer = setTimeout(poll, 2000);
+    entry.timer = setTimeout(() => poll(jobId), 2000);
   }
 }
 
-async function finishBatch(snap) {
-  const focused = state.focus?.batchTurn ? state.focus.index : null;
-  const chatId = state.job.chat;
-  const sent = state.job.chips ?? null;
-  state.job = null;
-  writeStorage(sessionStorage, JOB_KEY, null);
-  setGeometryBusy(false);
-  clearChips(sent); // 这一批出完了：出题选项恢复成不选
+function dropJob(entry) {
+  clearTimeout(entry.timer);
+  state.jobs.delete(entry.id);
+  saveJobs();
+  updateBusy();
+}
+
+async function finishBatch(entry, snap) {
+  const focus = state.focus;
+  const focused = focus?.batchTurn?.batchId === entry.id ? focus.index : null;
+  // 右栏正显示着这个对话里别的题（比如同时在出的另一道）：重新打开对话以后还显示它
+  const keep = focus && !focus.batchTurn && !focus.paperTurn && (focus.jobId || focus.recordId)
+    ? { jobId: focus.jobId, recordId: focus.recordId } : null;
+  const chatId = entry.chat;
+  dropJob(entry);
   refreshComposer();
   // 每一道都存成了出题记录：重新打开这个对话，这一批就按记录显示（能看题、组卷、进题库）
-  if (state.chat?.id === chatId) await openChat(chatId, { quiet: true, focusBatch: { id: snap.id, index: focused } });
-  loadSessions();
+  if (state.mode === 'chat' && state.chat?.id === chatId) {
+    await openChat(chatId, { quiet: true, focusBatch: keep && !focused ? null : { id: snap.id, index: focused } });
+    const again = keep && state.chat?.turns.find((turn) => (keep.jobId && turn.jobId === keep.jobId) || (keep.recordId && turn.recordId === keep.recordId));
+    if (again && !focused) focusTurn(again);
+  }
   refreshCounts();
   const { done, failed } = snap.totals;
-  if (snap.status === 'cancelled') toast(`已停下：出好的 ${done} 道已收进题库`);
-  else toast(failed ? `出好 ${done} 道，${failed} 道没出成；出好的已收进题库` : `${done} 道题都出好了，已收进题库`);
+  if (snap.status === 'cancelled') announce(chatId, `已停下：出好的 ${done} 道已收进题库`, entry.title);
+  else announce(chatId, failed ? `出好 ${done} 道，${failed} 道没出成；出好的已收进题库` : `${done} 道题都出好了，已收进题库`, entry.title);
 }
 
 // 组卷结束：这一轮按最后的结果显示；组成了试卷就在右栏打开整份试卷
-function finishPaper(snap) {
-  const turn = liveTurn();
-  const chatId = state.job.chat;
-  state.job = null;
-  writeStorage(sessionStorage, JOB_KEY, null);
-  setGeometryBusy(false);
+function finishPaper(entry, snap) {
+  const turn = turnFor(entry);
+  const chatId = entry.chat;
+  dropJob(entry);
   refreshComposer();
   if (turn) {
     turn.jobId = null;
@@ -2187,63 +2260,54 @@ function finishPaper(snap) {
     turn.render();
     if (snap.paper && state.mode === 'chat') focusTurn(turn);
   }
-  loadSessions();
   refreshCounts();
   loadContext(chatId);
-  if (snap.paper) toast(snap.status === 'cancelled' ? '已停下：用已有的题组成了试卷' : `试卷组好了：${snap.paper.count} 道题，已存进“试卷”`);
-  else if (snap.status === 'cancelled') toast('已停下');
+  if (snap.paper) announce(chatId, snap.status === 'cancelled' ? '已停下：用已有的题组成了试卷' : `试卷组好了：${snap.paper.count} 道题，已存进“试卷”`, entry.title);
+  else announce(chatId, snap.status === 'cancelled' ? '已停下' : '组卷没完成', entry.title);
 }
 
 // 识别完了：这一轮换成核对卡片（题目、答案、解析，勾选后存进题库）
-function finishImport(snap) {
-  const turn = liveTurn();
-  const chatId = state.job.chat;
-  state.job = null;
-  writeStorage(sessionStorage, JOB_KEY, null);
-  setGeometryBusy(false);
+function finishImport(entry, snap) {
+  const turn = turnFor(entry);
+  const chatId = entry.chat;
+  dropJob(entry);
   refreshComposer();
   if (turn) {
     turn.jobId = null;
     turn.load(importRecord(snap));
     turn.render();
   }
-  loadSessions();
   loadContext(chatId);
-  if (snap.status === 'cancelled') toast('已停下');
-  else toast(snap.questions.length ? `识别出 ${snap.questions.length} 道题，核对以后再存进题库` : '没有识别出题目');
+  if (snap.status === 'cancelled') announce(chatId, '已停下', entry.title);
+  else announce(chatId, snap.questions.length ? `整理出 ${snap.questions.length} 道题，核对以后再存进题库` : '没有找到可以存的题', entry.title);
 }
 
-function finishLive(snap) {
-  if (state.job?.import) {
-    finishImport(snap);
+function finishLive(entry, snap) {
+  if (entry.import) {
+    finishImport(entry, snap);
     return;
   }
-  if (state.job?.paper) {
-    finishPaper(snap);
+  if (entry.paper) {
+    finishPaper(entry, snap);
     return;
   }
-  if (state.job?.batch) {
-    finishBatch(snap);
+  if (entry.batch) {
+    finishBatch(entry, snap);
     return;
   }
-  const turn = liveTurn();
-  const chatId = state.job.chat;
-  const sent = state.job.chips ?? null;
-  state.job = null;
-  writeStorage(sessionStorage, JOB_KEY, null);
+  const turn = turnFor(entry);
+  const chatId = entry.chat;
+  dropJob(entry);
   if (turn) {
     turn.jobId = null;
     turn.recordId = snap.id;
     renderTurn(turn);
   }
-  setGeometryBusy(false);
-  clearChips(sent); // 这道题出完了：出题选项恢复成不选
   refreshComposer();
-  loadSessions();
   refreshCounts();
   loadContext(chatId);
-  if (snap.status === 'succeeded') toast('题目出好了，已收进题库');
-  else if (snap.status === 'cancelled') toast('已停下');
+  if (snap.status === 'succeeded') announce(chatId, '题目出好了，已收进题库', entry.title);
+  else announce(chatId, snap.status === 'cancelled' ? '已停下' : '这道题没出成，点开看原因', entry.title);
 }
 
 // 停止：服务端当场掐断正在进行的模型请求，等它收完尾才返回（一般零点几秒），这里马上刷新这一轮，不等下一次轮询
@@ -2261,7 +2325,7 @@ async function stopJob(turn) {
     turn.stopping = false;
     if (turn.stopBtn) turn.stopBtn.disabled = false;
   }
-  if (state.job?.id === turn.jobId) poll();
+  if (state.jobs.has(turn.jobId)) poll(turn.jobId);
 }
 
 function openBank(focus = null) {
@@ -2274,11 +2338,14 @@ function openPapers() {
   papers.show();
 }
 
+// 正在进行的几轮：用时每 0.25 秒走一次（只走打开着的对话里的）
 setInterval(() => {
-  const turn = liveTurn();
-  const snap = state.liveSnapshot;
-  if (!turn || !snap || !['queued', 'running'].includes(snap.status)) return;
-  turn.tick(snap.elapsed + (performance.now() - state.snapshotAt) / 1000);
+  for (const entry of state.jobs.values()) {
+    const snap = entry.snapshot;
+    if (!snap || !['queued', 'running'].includes(snap.status)) continue;
+    const turn = turnFor(entry);
+    if (turn) turn.tick(snap.elapsed + (performance.now() - entry.snapshotAt) / 1000);
+  }
 }, 250);
 
 // ---------- 历史对话与回放 ----------
@@ -2297,18 +2364,23 @@ function renderSessions() {
   const items = [...state.sessions];
   // 新对话里正在出第一道题（或者在等第一句的回答）：服务器上还没有这个对话，先补一条
   const now = new Date().toISOString();
-  if (state.job && !items.some((session) => session.id === state.job.chat)) {
-    items.unshift({ id: state.job.chat, count: 0, knowledge: '', updated_at: now, fresh: true, title: state.job.paper ? '组卷' : '' });
+  for (const entry of state.jobs.values()) {
+    if (!items.some((session) => session.id === entry.chat)) {
+      items.unshift({ id: entry.chat, count: 0, knowledge: '', updated_at: now, fresh: true, title: entry.title || (entry.paper ? '组卷' : '') });
+    }
   }
-  if (state.pending && !items.some((session) => session.id === state.pending.chat)) {
-    items.unshift({ id: state.pending.chat, count: 0, knowledge: '', updated_at: now, fresh: true, title: state.pending.text.slice(0, 40), chats: 1 });
+  for (const pending of state.pendings.values()) {
+    if (!items.some((session) => session.id === pending.chat)) {
+      items.unshift({ id: pending.chat, count: 0, knowledge: '', updated_at: now, fresh: true, title: pending.text.slice(0, 40), chats: 1 });
+    }
   }
   if (!items.length) {
     ui.historyList.append(el('li', 'history-empty', '对话会列在这里：出的题、组的卷、聊过的问题都在里面。'));
     return;
   }
   for (const session of items) {
-    const live = state.job?.chat === session.id;
+    const running = chatJobs(session.id);
+    const live = running.length > 0;
     const status = !live && !session.papers && session.last_status && session.last_status !== 'succeeded' ? ` ${session.last_status}` : '';
     const button = el('button', `history-item${live ? ' live' : ''}${status}`);
     button.type = 'button';
@@ -2316,7 +2388,13 @@ function renderSessions() {
     button.setAttribute('aria-current', String(state.mode === 'chat' && state.chat?.id === session.id));
     const meta = el('span', 'meta');
     if (live) {
-      meta.append(el('span', '', state.job.paper ? '正在组卷' : session.count ? `${session.count} 道题，正在出下一道` : '正在出题'));
+      // 这个对话里正在做什么：组卷 / 整理要存的题 / 出一批 / 出一道（同时有几件就说几件）
+      const doing = running.length > 1 ? `同时在做 ${running.length} 件事`
+        : running[0].paper ? '正在组卷'
+          : running[0].import ? '正在整理要存的题'
+            : running[0].batch ? `正在出 ${running[0].count} 道题`
+              : session.count ? `${session.count} 道题，正在出下一道` : '正在出题';
+      meta.append(el('span', '', doing));
     } else {
       // 有组卷的写"组卷"；出过题的写几道题（一道就写题型）；只聊过天的写"对话"
       const kind = session.papers ? '组卷'
@@ -2495,11 +2573,11 @@ async function pinSession(session, pinned) {
 }
 
 async function deleteSession(session, button, withBank = false) {
-  if (state.job?.chat === session.id) {
+  if (chatJobs(session.id).length) {
     toast('这个对话里还有题在出，等它出完或先停止，再删除');
     return;
   }
-  if (state.pending?.chat === session.id) {
+  if (state.pendings.has(session.id)) {
     toast('这个对话里还有一句在回答，等它答完再删除');
     return;
   }
@@ -2529,7 +2607,8 @@ async function deleteSession(session, button, withBank = false) {
 // 打开一个对话：按顺序把每一道题排出来；正在出的那道接在最后
 // focusBatch：{ id, index } 打开后右栏显示这一批的第 index 道（批量刚出完时用）
 async function openChat(id, { quiet = false, focusBatch = null } = {}) {
-  const hasJob = state.job?.chat === id;
+  const live = chatJobs(id); // 这个对话里正在进行的任务（按开始的先后）
+  const hasJob = live.length > 0;
   let records = [];
   try {
     records = await request(`/api/sessions/${encodeURIComponent(id)}`);
@@ -2547,6 +2626,10 @@ async function openChat(id, { quiet = false, focusBatch = null } = {}) {
   for (const record of records) {
     if (record.kind === 'chat') {
       addChatTurn(record.text || '', record.attachments || []).show(record);
+      continue;
+    }
+    if (record.kind === 'organize') {
+      appendTurn(new OrganizeTurn(organizeActions, record));
       continue;
     }
     if (record.kind === 'import') {
@@ -2579,53 +2662,44 @@ async function openChat(id, { quiet = false, focusBatch = null } = {}) {
     turn.snapshot = recordSnapshot(record);
     turn.render();
   }
-  const liveBatch = hasJob && state.job.batch;
-  if (liveBatch && !batches.has(state.job.id)) {
+  // 正在出的一批：已经出好的几道有记录（上面合成了一轮），接着跟踪；还一道都没出好的，补一轮
+  const liveBatches = new Map(live.filter((entry) => entry.batch).map((entry) => [entry.id, entry]));
+  for (const entry of liveBatches.values()) {
+    if (batches.has(entry.id)) continue;
     const turn = addBatchTurn();
-    turn.batchId = state.job.id;
-    turn.count = state.job.count || 0;
-    batches.set(state.job.id, turn);
+    turn.batchId = entry.id;
+    turn.count = entry.count || 0;
+    batches.set(entry.id, turn);
   }
   for (const [batchId, turn] of batches) {
-    const live = liveBatch && batchId === state.job.id;
-    if (live) {
+    const entry = liveBatches.get(batchId);
+    if (entry) {
       turn.jobId = batchId;
-      if (state.liveSnapshot?.items) {
-        turn.snapshot = state.liveSnapshot;
-        turn.count = state.liveSnapshot.count;
-        turn.request = turn.request || { brief: state.liveSnapshot.brief, meta: state.liveSnapshot.meta, config: state.liveSnapshot.config };
+      const snap = entry.snapshot;
+      if (snap?.items) {
+        turn.snapshot = snap;
+        turn.count = snap.count;
+        turn.request = turn.request || { brief: snap.brief, meta: snap.meta, config: snap.config };
       }
     }
-    if (turn.request || turn.snapshot) turn.render({ live });
+    if (turn.request || turn.snapshot) turn.render({ live: Boolean(entry) });
   }
-  // 正在识别附件里的题：做完才存记录，这里接上正在做的那一轮
-  if (hasJob && state.job.import && !records.some((record) => record.import_id === state.job.id)) {
-    const turn = addImportTurn();
-    turn.jobId = state.job.id;
-    if (state.liveSnapshot?.id === state.job.id) {
-      turn.snapshot = state.liveSnapshot;
-      turn.render({ live: true });
-    }
-  }
-  // 正在组卷：组完才存记录，这里接上正在组的那一轮
-  if (hasJob && state.job.paper && !assemblies.has(state.job.id)) {
-    const turn = addPaperTurn();
-    turn.jobId = state.job.id;
-    if (state.liveSnapshot?.id === state.job.id) {
-      turn.snapshot = state.liveSnapshot;
-      turn.render({ live: true });
-    }
-  }
-  if (hasJob && !state.job.batch && !state.job.paper && !state.job.import && !records.some((record) => record.id === state.job.id)) {
-    const turn = addTurn();
-    turn.jobId = state.job.id;
-    if (state.liveSnapshot) {
-      turn.snapshot = state.liveSnapshot;
+  // 其余正在做的（识别题目、组卷、出一道题）做完才存记录：按开始的先后接在最后
+  for (const entry of live) {
+    if (entry.batch) continue;
+    if (entry.import && records.some((record) => record.import_id === entry.id)) continue;
+    if (entry.paper && assemblies.has(entry.id)) continue;
+    if (!entry.import && !entry.paper && records.some((record) => record.id === entry.id)) continue;
+    const turn = entry.import ? addImportTurn() : entry.paper ? addPaperTurn() : addTurn();
+    turn.jobId = entry.id;
+    if (entry.snapshot) {
+      turn.snapshot = entry.snapshot;
       turn.render({ live: true });
     }
   }
   // 这个对话里还有一句在等回答：接回到最后（回答回来以后就显示在这一轮里）
-  if (state.pending?.chat === id && !state.chat.turns.includes(state.pending.turn)) appendTurn(state.pending.turn);
+  const pending = state.pendings.get(id);
+  if (pending && !state.chat.turns.includes(pending.turn)) appendTurn(pending.turn);
   setMode('chat');
   const target = focusBatch && batches.get(focusBatch.id);
   if (target && focusBatch.index) showBatchItem(target, focusBatch.index, false);
@@ -2696,7 +2770,7 @@ function stopReplay() {
     turn.outcomeKey = '';
   }
   renderTurn(turn, { animate: false });
-  setGeometryBusy(Boolean(state.job));
+  updateBusy();
 }
 
 async function replay(turn) {
@@ -2823,13 +2897,13 @@ function bindEvents() {
   window.addEventListener('resize', positionPopover);
   ui.threadScroll.addEventListener('scroll', positionPopover);
 
+  // 新对话：别的对话里正在出的题照常在后台出（侧栏标着"正在出题"），这里可以马上出下一道
   $('#newTask').addEventListener('click', () => {
     resetChat(null);
     setMode('idle');
     renderGreeting();
     shuffleSuggestions();
     ui.prompt.focus();
-    if (state.job) toast('上一道题还在出，出好以后才能开始新的一道');
   });
   $('#bankLink').addEventListener('click', () => openBank());
   $('#papersLink').addEventListener('click', () => openPapers());
@@ -3021,18 +3095,24 @@ async function init() {
   await loadSessions();
   state.ready = true;
 
-  // 刷新页面后回到刚才的对话；有题正在出就接着看进度
-  const pending = readStorage(sessionStorage, JOB_KEY);
-  const chat = readStorage(sessionStorage, CHAT_KEY);
-  if (pending?.id && pending?.chat) {
-    state.job = pending;
-    setGeometryBusy(true);
-    await openChat(pending.chat, { quiet: true });
-    refreshComposer();
-    poll();
-  } else if (chat) {
-    await openChat(chat, { quiet: true });
+  // 刷新页面后回到刚才的对话；有题正在出（哪个对话里都算）就接着看进度
+  const old = readStorage(sessionStorage, OLD_JOB_KEY);
+  const saved = readStorage(sessionStorage, JOBS_KEY) || (old?.id ? [old] : []);
+  writeStorage(sessionStorage, OLD_JOB_KEY, null);
+  for (const job of Array.isArray(saved) ? saved : []) {
+    if (!job?.id || !job?.chat) continue;
+    state.jobs.set(job.id, {
+      id: job.id, chat: job.chat, batch: Boolean(job.batch), paper: Boolean(job.paper), import: Boolean(job.import),
+      count: job.count || 1, title: job.title || '', snapshot: null, snapshotAt: performance.now(), timer: null,
+    });
   }
+  saveJobs();
+  updateBusy();
+  const chat = readStorage(sessionStorage, CHAT_KEY) || [...state.jobs.values()].at(-1)?.chat;
+  if (chat) await openChat(chat, { quiet: true });
+  refreshComposer();
+  renderSessions();
+  for (const id of state.jobs.keys()) poll(id);
 }
 
 init();

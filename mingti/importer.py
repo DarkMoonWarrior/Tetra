@@ -72,11 +72,41 @@ SOLVE_INSTRUCTIONS = """你是高中数学老师。下面这道题（question_ty
 - 题目条件不完整、没法解时，answer 写空字符串，method 写明缺了什么。
 公式用 LaTeX 写在 $…$ 里。只输出 JSON：{"answer": "...", "method": "...", "steps": ["..."]}"""
 
+# 从对话里存题（用户说"把这道题存进题库"，题在前文里：之前发的图片、文字，或者助手解过的题）
+CHAT_INSTRUCTIONS = """你是题库录入员。用户要把对话（conversation）里的题存进题库，request 是用户这次说的话。请找出要存的题，录成 JSON。
+- 存哪几道：按 request 和前文判断。“这道题”“这个题”指最近讨论的那一道；“这几道”“刚才的题”指最近一次发来或讨论过的全部题目。助手回答里顺带举的例题不算，除非用户点名要存。
+- 题干、选项：照原题一字不落地录完整，条件、数字、小问、公式一个都不能漏，不要改写或概括；选择题题干末尾的（　　）不要写，填空题的空写成 ______，解答题的小问各占一行。
+  随消息发来的图片是用户之前上传的原题，有图片时以图片为准；没有图片时按对话里写出的题目录（助手解题时一般先把题目原样写了一遍）。
+- 答案和解析：用对话里已经给出的解答，结论必须和对话里一致，不要自己重新解或改结论；整理成试卷参考答案的写法：
+  answer 写最终答案（单选写一个选项字母，多选把字母连着写，填空写结果、几个空用“；”隔开，解答题按（1）（2）……写出每一问的结论，证明题写“证明见解析”）；
+  method 写【分析】，一句话点明思路，不超过 40 字；
+  solution_steps 写【详解】，每一项是一行推理或计算，用“因为……所以……”“由……得……”衔接，不写“第一步”“1.”这类编号，不用 Markdown 的标题、加粗、列表记号，解答题每一问另起一行、以“(1)”“(2)”开头。
+  对话里没有解答的题，answer、method、solution_steps 留空（之后会另外补写）。
+- 用户在 request 或前文里对这道题提过的修改（比如“难度按 5 星”“知识点补上韦达定理”），照着改。
+- question_type：single_choice 单选、multiple_choice 多选、fill_blank 填空、open_response 解答。
+- knowledge：从下面的考点列表里选最贴近的一个，原样写名字；实在对不上写空串。difficulty：1 到 5（1 基础、3 中档、5 压轴），用户说了难度就按用户说的。
+- 题目有配图的，has_figure 写 true；有图片时，image 写配图在第几张图片上（从 1 数），figure_box 写配图（连同图上的字母）在那张图片上的位置 [左, 上, 右, 下]，用图片宽、高的千分数。
+公式一律写成 LaTeX，用 $…$ 包住。对话里找不到要存的题时，questions 写空数组。
+只输出 JSON：{"questions":[{"number":"","question_type":"open_response","stem":"…","options":[],"answer":"","method":"","solution_steps":[],"knowledge":"","difficulty":3,"has_figure":false,"image":1,"figure_box":[]}]}"""
+
+# 题干说了"如图"、手里有原图，模型却没给配图位置时：单独问一次配图在哪（只问这一件事，比录题时顺带给的准）
+LOCATE_INSTRUCTIONS = """这张图片上有一道数学题（stem 是它的题干）。请找出题目的配图（几何图形、函数图象、统计图表等，不是文字），
+给出它在图片上的位置 box = [左, 上, 右, 下]，用图片宽、高的千分数（0 到 1000），要把图上的字母、坐标轴标记和"图 1"这类图号都框进去；
+有好几张图（图 1、图 2）就框住全部。图片上没有配图时 box 写 null。只输出 JSON：{"box": [左, 上, 右, 下]}"""
+LOCATE_SCHEMA = {"type": "object", "properties": {"box": {"type": ["array", "null"], "items": {"type": "number"}}}, "required": ["box"]}
+
 SOLVE_SCHEMA = {
     "type": "object",
     "properties": {"answer": {"type": "string"}, "method": {"type": "string"}, "steps": {"type": "array", "items": {"type": "string"}}},
     "required": ["answer", "method", "steps"],
 }
+
+
+def _method_text(value) -> str:
+    """【分析】那一句：模型常把"【分析】""分析："也写进去，卡片和题目卡上会自己加标签，这里去掉。"""
+    text = str(value or "").strip()
+    text = re.sub(r"^\s*(?:【\s*(?:分析|思路)\s*】|(?:分析|思路)\s*[：:])\s*", "", text)
+    return text[:200]
 
 
 def complete_solution(item: dict, route, thinking: bool | str) -> dict:
@@ -101,7 +131,7 @@ def complete_solution(item: dict, route, thinking: bool | str) -> dict:
     closing = closing_line({"question_type": item.get("question_type"), "answer_value": answer, "final_answer": answer})
     return {
         "answer": answer,
-        "solution_method": str(result.get("method") or "").strip()[:200],
+        "solution_method": _method_text(result.get("method")),
         "solution_steps": (steps + ([closing] if closing else []))[:60],
     }
 
@@ -254,23 +284,104 @@ def vector_figures(page) -> dict[str, dict]:
     return out
 
 
+def _runs(flags: list[bool], gap: int) -> list[tuple[int, int]]:
+    """连续为真的一段段（中间空开不超过 gap 的并成一段）：[(起, 止)]。"""
+    out: list[tuple[int, int]] = []
+    start = last = None
+    for i, flag in enumerate(flags):
+        if not flag:
+            continue
+        if start is None:
+            start = i
+        elif i - last - 1 > gap:
+            out.append((start, last))
+            start = i
+        last = i
+    if start is not None:
+        out.append((start, last))
+    return out
+
+
+def snap_box(png: bytes, box: tuple) -> tuple:
+    """模型给的配图位置常常不准（截掉图的下半截，或者带上上一行字）：在整页图上找出这个位置落在的那一块墨迹
+    （图连同图上的字母；紧挨在下面的"图 1"这类图号也算），按它截。找不到可靠的一块就用原来的位置。
+    box 和返回值都是图片宽、高的千分数 (x0, y0, x1, y1)。"""
+    import pymupdf
+
+    pix = pymupdf.Pixmap(png)
+    if pix.alpha or pix.n != 1:
+        pix = pymupdf.Pixmap(pymupdf.csGRAY, pix)
+    while max(pix.width, pix.height) > 1400:
+        pix.shrink(1)
+    w, h, stride, samples = pix.width, pix.height, pix.stride, pix.samples
+    if w < 40 or h < 40:
+        return box
+    bx0, by0, bx1, by1 = (box[0] * w / 1000, box[1] * h / 1000, box[2] * w / 1000, box[3] * h / 1000)
+    # 按行找墨迹：只看模型给的左右范围（两边各放宽一成），免得把旁边一栏的字算进来
+    xa, xb = max(0, int(bx0 - 0.1 * w)), min(w, int(bx1 + 0.1 * w) + 1)
+    rows = [min(samples[y * stride + xa: y * stride + xb]) < 150 for y in range(h)]
+    blocks = _runs(rows, max(2, round(0.012 * h)))
+    overlap = lambda run: min(run[1] + 1, by1) - max(run[0], by0)  # noqa: E731
+    best = max(blocks, key=overlap, default=None)
+    if best is None or overlap(best) <= 0 or best[1] - best[0] > 0.8 * h:
+        return box
+    top, bottom = best
+
+    def sparse(run: tuple[int, int]) -> bool:
+        """又矮又稀的一行：图上的点名（P）、图号（图 1），不是一行字。"""
+        if run[1] - run[0] > 0.04 * h:
+            return False
+        band = [min(samples[y * stride + x] for y in range(run[0], run[1] + 1)) < 150 for x in range(xa, xb)]
+        return sum(band) < 0.25 * (xb - xa)
+
+    # 往上：贴着图顶的点名（离得很近才算，免得把上一段末尾的"如图 2）."带进来）；往下：紧挨着的图号
+    index = blocks.index(best)
+    for step, reach in ((-1, 0.02), (1, 0.045)):
+        k = index
+        for _ in range(2):
+            k += step
+            if not 0 <= k < len(blocks):
+                break
+            run = blocks[k]
+            near = (top - run[1]) if step < 0 else (run[0] - bottom)
+            if near > reach * h or not sparse(run):
+                break
+            top, bottom = (run[0], bottom) if step < 0 else (top, run[1])
+    # 按列找墨迹（整个宽度）：两张图并排时各成一段，取和模型给的范围重叠的那几段，每段取全
+    cols = [min(samples[y * stride + x] for y in range(top, bottom + 1, 2)) < 150 for x in range(w)]
+    pieces = _runs(cols, max(3, round(0.04 * w)))
+    chosen = [p for p in pieces if min(p[1] + 1, bx1) - max(p[0], bx0) > 0] or pieces
+    if not chosen:
+        return box
+    left, right = min(p[0] for p in chosen), max(p[1] for p in chosen)
+    return (left * 1000 / w, top * 1000 / h, (right + 1) * 1000 / w, (bottom + 1) * 1000 / h)
+
+
 def raster_figure(png: bytes, box) -> str:
-    """照片、扫描件上的图没有线条可找：按模型给的位置（图片宽、高的千分数）从整页图片里截。"""
+    """照片、扫描件上的图没有线条可找：按模型给的位置（图片宽、高的千分数）从整页图片里截，
+    截之前先对准图上真正的墨迹（snap_box）。"""
     import pymupdf
 
     try:
         x0, y0, x1, y1 = [max(0.0, min(1000.0, float(v))) for v in box]
     except (TypeError, ValueError):
         return ""
-    # 太小、太大（差不多整页）的位置都不可信
+    # 模型给的位置太小、太大（差不多整页）都不可信
     if x1 - x0 < 30 or y1 - y0 < 30 or (x1 - x0) * (y1 - y0) > 600_000:
         return ""
+    pad = 15  # 模型给的框常常偏紧，四边各放宽 1.5%
+    try:
+        snapped = snap_box(png, (x0, y0, x1, y1))
+        if snapped != (x0, y0, x1, y1):
+            x0, y0, x1, y1 = snapped
+            pad = 8  # 对准了墨迹：留一点白边就够
+    except Exception:  # noqa: BLE001 - 对不准就按模型给的位置截
+        logger.exception("配图位置没对准，按模型给的位置截")
     document = pymupdf.open(stream=png, filetype="png")
     try:
         page = document[0]
         zoom = pymupdf.Pixmap(png).width / page.rect.width  # 按原图的像素截，不缩小
         w, h = page.rect.width, page.rect.height
-        pad = 15  # 模型给的框常常偏紧，四边各放宽 1.5%
         clip = pymupdf.Rect((x0 - pad) * w / 1000, (y0 - pad) * h / 1000, (x1 + pad) * w / 1000, (y1 + pad) * h / 1000) & page.rect
         return _clip_figure(page, clip, zoom)
     finally:
@@ -338,6 +449,8 @@ class ImportJob:
         self.extra: dict[int, dict] = {}  # 第几道题（index）→ 补写的答案和解析
         self.extra_errors: dict[int, str] = {}
         self.solving_total = 0
+        # files：从上传的文件里逐页识别；conversation：从对话里把讨论过的题整理出来（见 start_from_chat）
+        self.source = "files"
 
 
 class ImportManager:
@@ -371,6 +484,115 @@ class ImportManager:
             self._jobs[job.id] = job
         threading.Thread(target=self._run, args=(job, edition), name=f"mingti-import-{job.id}", daemon=True).start()
         return job
+
+    def start_from_chat(self, conversation: list[dict], request_text: str, files: list[dict], model_id: str | None,
+                        edition: str, *, chat: dict) -> ImportJob:
+        """从对话里存题：用户说"把这道题存进题库"，题在前文里（之前发的图片、文字，或者助手解过的题）。
+        conversation：前文 [{role, content}]；files：前文里还能取到的图片、PDF（有就带上，题干照原图录、配图从原图上截）。
+        一次调用把要存的题和对话里的解答整理成题库的格式，没有解答的再补写，最后和附件导入一样做成核对卡片。"""
+        options = self.models.options
+        if not options:
+            raise ImportError_("还没有可用的模型")
+        option = next((o for o in options if o.id == model_id), None) or options[0]
+        pages = render_pages(files)[:8] if files else [{"file": "对话", "page": 1, "png": b"", "figures": {}}]
+        job = ImportJob(f"im_{uuid.uuid4().hex[:10]}", pages, option.id)
+        job.chat = chat
+        job.source = "conversation"
+        with self._lock:
+            self._jobs[job.id] = job
+        threading.Thread(
+            target=self._run_conversation, args=(job, edition, conversation, request_text, bool(files)),
+            name=f"mingti-import-{job.id}", daemon=True,
+        ).start()
+        return job
+
+    def _run_conversation(self, job: ImportJob, edition: str, conversation: list[dict], request_text: str,
+                          with_images: bool) -> None:
+        kp_index = self._kp_index(edition)
+        job.kp_index = kp_index
+        route = self.models.route(job.model)
+        try:
+            payload = {
+                "request": request_text or "把这道题存进题库",
+                "conversation": conversation,
+                "images": [f"第 {i + 1} 张：《{page['file']}》第 {page['page']} 页" for i, page in enumerate(job.pages)]
+                if with_images else [],
+            }
+            try:
+                with abort.active(job.abort_scope):
+                    raw = route.client.request(
+                        instructions=f"{CHAT_INSTRUCTIONS}\n考点列表：{'、'.join(kp_index)}",
+                        input_text=json.dumps(payload, ensure_ascii=False),
+                        action="整理对话里的题",
+                        image_data_urls=[_data_url(page["png"]) for page in job.pages] if with_images else None,
+                        max_tokens=8000,
+                        recovery_instruction="只修复 JSON 结构，内容不变。",
+                    )
+                result = json.loads(raw["output"][0]["content"][0]["text"])
+            except abort.StopRequested:
+                result = {}
+            except (DeepSeekClientError, ValueError, KeyError, IndexError, TypeError) as exc:
+                with job.lock:
+                    job.errors[0] = str(exc)[:300]
+                result = {}
+            found = [q for q in (result.get("questions") if isinstance(result, dict) else None) or [] if isinstance(q, dict)]
+            # 按配图在第几张图片上分到各页（截配图要用那一页的图）；没有图片的都放在第一页
+            grouped: dict[int, list[dict]] = {}
+            for question in found:
+                try:
+                    number = int(question.get("image") or 1) - 1 if with_images else 0
+                except (TypeError, ValueError):
+                    number = 0
+                number = min(max(number, 0), len(job.pages) - 1)
+                question["continued"] = question["truncated"] = False  # 对话里的题都是完整的一道，不要接到前一道上
+                # 题干说了"如图"、有原图，却没给配图位置：单独问一次配图在哪
+                if with_images and not job.stop_requested and not question.get("figure_box") \
+                        and FIGURE_HINT.search(str(question.get("stem") or "")):
+                    box = self._locate_figure(job, route, job.pages[number]["png"], str(question.get("stem") or ""))
+                    if box:
+                        question.update(has_figure=True, figure_box=box)
+                grouped.setdefault(number, []).append(question)
+            for number, questions in grouped.items():
+                page_payload = {"page_kind": "mixed", "questions": questions}
+                _attach_figures(page_payload, job.pages[number])
+                with job.lock:
+                    job.results[number] = page_payload
+            if not found and 0 not in job.errors:
+                with job.lock:
+                    job.results[0] = {"page_kind": "other", "questions": []}
+            if found and not job.stop_requested:
+                self._complete_solutions(job)
+        except Exception:  # noqa: BLE001 - 出错要反馈到界面
+            logger.exception("从对话存题 %s 出错", job.id)
+        finally:
+            try:
+                self._save_card(job)
+            except Exception:  # noqa: BLE001 - 存核对卡片失败要记下来
+                logger.exception("从对话存题 %s 没能存进对话", job.id)
+            with job.lock:
+                job.status = "cancelled" if job.stop_requested else "done"
+                job.stage = "done"
+                job.finished_at = time.time()
+
+    @staticmethod
+    def _locate_figure(job: ImportJob, route, png: bytes, stem: str) -> list | None:
+        """问模型这张图片上配图在哪：[左, 上, 右, 下]（千分数）；没有、没问成都返回 None（之后截图时还会对准墨迹）。"""
+        try:
+            with abort.active(job.abort_scope):
+                raw = route.client.request(
+                    instructions=LOCATE_INSTRUCTIONS,
+                    input_text=json.dumps({"stem": stem[:600]}, ensure_ascii=False),
+                    action="找配图的位置",
+                    output_schema=LOCATE_SCHEMA,
+                    image_data_url=_data_url(png),
+                    max_tokens=400,
+                    recovery_instruction="只修复 JSON 结构。",
+                )
+            box = json.loads(raw["output"][0]["content"][0]["text"]).get("box")
+            return [float(v) for v in box][:4] if isinstance(box, list) and len(box) >= 4 else None
+        except Exception:  # noqa: BLE001 - 找不到配图位置就只是没有配图
+            logger.info("没找到配图的位置", exc_info=True)
+            return None
 
     def get(self, job_id: str) -> ImportJob | None:
         with self._lock:
@@ -492,7 +714,9 @@ class ImportManager:
             "text": chat.get("text") or "",
             "attachments": chat.get("attachments") or [],
             "import_id": job.id,
-            "status": "review" if snapshot["questions"] else ("cancelled" if job.status == "cancelled" else "empty"),
+            "source": job.source,
+            "folder": chat.get("folder"),  # 用户说了存到哪个文件夹（核对卡片上预先选好）
+            "status": "review" if snapshot["questions"] else ("cancelled" if job.stop_requested else "empty"),
             "questions": snapshot["questions"],
             "errors": snapshot["errors"],
             "pages": snapshot["pages"],
@@ -607,6 +831,8 @@ class ImportManager:
             "message_id": (job.chat or {}).get("message_id"),
             "text": (job.chat or {}).get("text"),
             "attachments": (job.chat or {}).get("attachments") or [],
+            "source": job.source,
+            "folder": (job.chat or {}).get("folder"),
         }
 
     def save(self, job: ImportJob, picked: list[dict]) -> int:
@@ -725,7 +951,7 @@ def _attach_figures(payload: dict, page: dict) -> None:
         if found and (found["named"] or raw.get("has_figure") or FIGURE_HINT.search(str(raw.get("stem") or ""))):
             raw["figure_svg"] = found["svg"]
             raw["has_figure"] = True
-        elif raw.get("has_figure") and raw.get("figure_box"):
+        elif raw.get("has_figure") and raw.get("figure_box") and page.get("png"):
             try:
                 svg = raster_figure(page["png"], raw.get("figure_box"))
             except Exception:  # noqa: BLE001 - 截不到就提示老师重画
@@ -757,6 +983,8 @@ def _clean(raw: dict, page: dict) -> dict:
         "options": options,
         "answer": _tidy_answer(raw.get("answer")),
         "solution_steps": _steps(raw.get("solution_steps")),
+        # 【分析】：从对话里存题时用对话里的思路（逐页识别的原卷一般没有）
+        "solution_method": _method_text(raw.get("method") or raw.get("solution_method")),
         "kp_name": str(raw.get("knowledge") or "").strip(),
         "difficulty": difficulty,
         "has_figure": bool(raw.get("has_figure")),

@@ -55,7 +55,6 @@ export const EN = {
 "上一句还在回答": "Still answering the previous message",
 "发送：看附件里的内容回答（比如解题），或者把里面的题存进题库": "Send: answer based on the attachment contents (e.g. solve problems), or save its questions to the question bank",
 "发送：要出题就出题，要组卷就组卷，其他的直接回答": "Send: generate questions, assemble a paper, or answer anything else directly",
-"上一道题还在出": "Still generating the previous question",
 "不指定": "Not specified",
 "单选题": "Single choice",
 "中档": "Medium",
@@ -95,8 +94,8 @@ export const EN = {
 "导出 Word": "Export Word",
 "导出 PDF": "Export PDF",
 "试卷预览": "Paper preview",
-"上一批题还在出，等它结束或先停止": "The previous batch is still generating. Wait for it to finish or stop it first.",
 "题库里没找到这一批的题（可能已经删掉了）": "The questions from this batch were not found in the question bank (they may have been deleted)",
+"已撤销：题库恢复成整理之前的样子": "Undone: question bank restored to before cleanup",
 "正在构思题干": "Drafting the stem",
 "题干通过审题后会先显示在这里；答案和解析要等解题员写完、复核员核对后再补上。": "The stem will appear here after it passes review; the answer and solution will be added after the solver writes them and the reviewer checks them.",
 "已通过全部检查": "Passed all checks",
@@ -120,21 +119,27 @@ export const EN = {
 "上一句还在回答，等它答完再发": "The previous message is still being answered. Wait for it to finish before sending.",
 "前文太长，先压缩成摘要": "Context too long, compressing into a summary first",
 "正在想": "Thinking",
-"上一道题还在出，等它出完（或先停止）再存题": "The previous question is still generating. Wait for it to finish (or stop it) before saving.",
-"上一道题还在出，等它出完（或先停止）再组卷": "The previous question is still generating. Wait for it to finish (or stop it) before assembling a paper.",
-"上一道题还在出，等它结束或先停止": "The previous question is still generating. Wait for it to finish or stop it first.",
+"题库整理好了": "Question bank organized",
+"这次没有改动题库": "No changes to the question bank",
+"存题": "Save questions",
 "再试一次": "Try again",
 "再出一道同类题": "Generate another similar question",
 "难一点": "Harder",
 "简单一点": "Easier",
 "简单一点再试": "Try again with an easier one",
 "换个情境": "Change context",
+"开始组卷了": "Assembling the paper",
+"开始整理要存的题了": "Sorting questions to save",
+"开始出题了": "Generating questions",
 "服务重启过，这次组卷没有完成。已经现场出好的题都在题库里，可以再组一次。": "The service restarted, so this paper was not completed. Questions generated on the spot are all in the question bank; you can assemble again.",
 "已停下：用已有的题组成了试卷": "Stopped: assembled a paper from existing questions",
-"没有识别出题目": "No questions recognized",
+"组卷没完成": "Paper assembly incomplete",
+"没有找到可以存的题": "No questions found to save",
 "题目出好了，已收进题库": "Question generated and saved to the question bank",
+"这道题没出成，点开看原因": "This question failed; click to see why",
 "组卷": "Assemble a paper",
 "对话会列在这里：出的题、组的卷、聊过的问题都在里面。": "Chats will be listed here: generated questions, assembled papers, and past conversations are all in here.",
+"正在整理要存的题": "Sorting questions to save",
 "正在出题": "Generating",
 "对话": "Chat",
 "新对话": "New chat",
@@ -152,7 +157,6 @@ export const EN = {
 "这个对话里还有题在出，等它出完或先停止，再删除": "Questions are still being generated in this chat. Wait for them to finish or stop them before deleting.",
 "这个对话里还有一句在回答，等它答完再删除": "A reply is still being generated in this chat. Wait for it to finish before deleting.",
 "已删除对话": "Chat deleted",
-"上一道题还在出，出好以后才能开始新的一道": "The previous question is still being generated. You can start a new one after it finishes.",
 "已复制题目和解析（LaTeX）": "Copied question and solution (LaTeX)",
 "复制没成功，可以手动选中文字复制": "Copy failed. You can select the text and copy it manually.",
 "连不上本机服务": "Cannot connect to local service",
@@ -177,6 +181,9 @@ export const EN = {
 "从题库挑题": "Pick from question bank",
 "现场出题": "Generate live",
 "组成试卷": "Assemble paper",
+"题目全部现场出新题，不用题库里的题": "All questions generated fresh; no question bank questions used",
+"先从题库里挑合适的题，不够的现场出": "Pick suitable questions from the question bank first; generate the rest",
+"只用题库里的题，不现场出": "Use only question bank questions; no on-the-fly generation",
 "用时": "Time",
 "次调用": "calls",
 "停止": "Stop",
@@ -188,19 +195,24 @@ export const EN = {
 "正在组成试卷": "Assembling paper",
 "试卷组好了": "Paper assembled",
 "已停下，用已有的题组成了试卷": "Stopped; assembled a paper with the existing questions",
-"组卷没完成": "Paper assembly incomplete",
-"先按你的要求定组卷方案：考查范围、题型结构，以及每道题考什么知识点、多难、几分；然后从题库里挑题，题库里没有合适的再现场出题。": "First plan the paper per your requirements: scope, question type structure, and each question's knowledge point, difficulty, and score; then pick questions from the question bank, and generate live when no suitable questions are available.",
+"先按你的要求定组卷方案：考查范围、题型结构，以及每道题考什么知识点、多难、几分；再按你的说法准备题目：要原创就全部现场出新题，否则先从题库里挑，题库里没有合适的再现场出。": "First, define the plan based on your requirements: scope, type structure, and for each question its knowledge point, difficulty, and score; then prepare the questions as you said: for original, generate all fresh; otherwise pick from the question bank first and generate the rest if none suitable.",
+"不用题库": "No bank questions",
+"不现场出题": "Don't generate on the fly",
 "不用现场出题": "No live generation needed",
 "题库补": "Fill from question bank",
 "正在开始…": "Starting…",
+"等着现场出题": "Waiting to generate",
 "题库里没有合适的，等着现场出题": "No suitable questions in the question bank; waiting for live generation",
 "等挑题": "Waiting to pick",
 "已停下：": "Stopped:",
 "看整份试卷": "View full paper",
 "在试卷里调整": "Adjust in paper",
+"全部换成新题": "Replace all with new questions",
+"按同样的要求再组一份，题目全部现场出新题，不用题库里的题": "Assemble another paper with the same requirements, all questions generated fresh; no question bank questions used",
 "没能组成试卷。": "Failed to assemble paper.",
 "可以把要求说得具体一些（比如年级、考试类型、考到哪一章）再试。": "Try making your requirements more specific (e.g., grade, exam type, chapter coverage).",
 "导入题目": "Import questions",
+"新建文件夹": "New folder",
 "搜索题干或知识点，比如：椭圆、交集": "Search stems or knowledge points, e.g., ellipse, intersection",
 "搜索题库": "Search question bank",
 "按题型筛选": "Filter by type",
@@ -211,7 +223,25 @@ export const EN = {
 "最新在前": "Newest first",
 "按知识点": "By knowledge point",
 "题目怎么排列": "Question order",
+"文件夹位置": "Folder location",
+"全部题目": "All questions",
 "未归类": "Uncategorized",
+"这个文件夹：重命名、新建子文件夹、删除": "This folder: rename, create subfolder, delete",
+"文件夹操作": "Folder actions",
+"不在任何文件夹里的题；把题拖到这里就移出文件夹": "Questions not in any folder; drag questions here to remove them from folders",
+"新建子文件夹": "New subfolder",
+"文件夹名": "Folder name",
+"打开": "Open",
+"删除文件夹": "Delete folder",
+"上一级": "Up one level",
+"这是个空文件夹。": "This folder is empty.",
+"子文件夹也挪到上一级。": "Subfolders also move up one level.",
+"移到": "Move to",
+"未归类（不放在文件夹里）": "Uncategorized (not in a folder)",
+"新建文件夹…": "New folder…",
+"新建文件夹再移进去": "New folder and move in",
+"新建并移入": "Create and move in",
+"最外层": "Top level",
 "没写知识点": "No knowledge point",
 "全部知识点": "All knowledge points",
 "按教材目录找题": "Find questions by textbook contents",
@@ -222,10 +252,14 @@ export const EN = {
 "题库还是空的。出好的题会自动收进这里。": "The question bank is still empty. Generated questions will be added here automatically.",
 "去出题": "Go to Generate",
 "没有符合条件的题，换个关键词或筛选条件试试。": "No questions match the filters. Try another keyword or filter.",
+"这个文件夹里的题都在子文件夹里，点上面的子文件夹看。": "All questions in this folder are in subfolders; click a subfolder above to view.",
+"这个文件夹还是空的：回到全部题目，把题拖到这个文件夹上，或者勾选后点\"移到文件夹\"。": "This folder is still empty: go back to All questions, drag questions onto this folder, or select them and click \"Move to folder\".",
+"题都放进文件夹了。": "All questions are in folders.",
 "只看这个知识点的题": "Only show questions for this knowledge point",
 "选这道题来组卷": "Select this question for a paper",
 "导入": "Import",
 "改过": "Edited",
+"移到文件夹": "Move to folder",
 "用选中的题组卷": "Assemble a paper from selected questions",
 "精简解析": "Condense solutions",
 "取消选择": "Clear selection",
@@ -279,18 +313,29 @@ export const EN = {
 "已复制回答": "Answer copied",
 "按出题要求处理": "Handle as a generation request",
 "把这句话当作出题要求，按输入框下方的设置出题": "Treat this message as a generation request and generate using the settings below the input box",
+"把前面的题存进题库": "Save previous questions to the question bank",
 "把附件里的题存进题库": "Save the questions in the attachment to the question bank",
 "正在补写解析": "Writing solutions",
+"正在整理前面的题": "Sorting previous questions",
 "正在识别题目": "Recognizing questions",
+"整理": "Sort",
+"识别": "Detect",
+"把对话里的题（你发过的图片或文字）和前面写好的解答，整理成题库的格式：题干、选项、答案、解析、知识点。整理好以后先给你核对，确认了才存进题库。": "Sort the questions in the chat (images or text you sent) and the solutions written above into question bank format: stem, options, answer, solution, knowledge points. You'll review them before they're saved to the question bank.",
 "没有存进题库": "Not saved to the question bank",
+"前面的对话里没找到要存的题": "No questions found to save in the previous chat",
+"没有识别出题目": "No questions recognized",
 "识别完了": "Recognition complete",
-"题目都带着原来的解析。": "All questions include their original solutions.",
+"题目和解析是从前面的对话里整理的": "Questions and solutions were sorted from the previous chat",
+"题目都带着原来的解析": "All questions keep their original solutions",
+"把题目的图片发过来，或者直接把题目打出来，再说\"存进题库\"。": "Send an image of the questions or type them out, then say \"Save to question bank\".",
 "换一张更清楚的图片、PDF，或者换一个能看图的模型再试。": "Try a clearer image or PDF, or switch to a model that can read images.",
 "存进题库": "Save to question bank",
 "未对上考点": "No matching topic",
 "助手补写": "Assistant-written",
 "全不选": "Deselect all",
 "不存了": "Don't save",
+"存到": "Save to",
+"存到哪个文件夹": "Save to which folder",
 "好的，这些题没有存": "OK, these questions were not saved",
 "关闭": "Close",
 "把 PDF 或图片拖到这里": "Drag a PDF or image here",
@@ -304,6 +349,8 @@ export const EN = {
 "（中途停下了）": "(stopped)",
 "没有识别出题目。换一个更清楚的文件，或者换一个能看图的模型再试。": "No questions recognized. Try a clearer file or a model that can read images.",
 "停止识别": "Stop recognition",
+"这次整理已撤销": "This reorganization was undone",
+"撤销": "Undo",
 "正在生成 PDF…": "Generating PDF…",
 "正在生成 Word…": "Generating Word…",
 "在题库里勾选题目，点「用选中的题组卷」；也可以先建一份空白试卷，再从题库添加。组好后可以导出 Word 或 PDF。": "Tick questions in the question bank and click \"Assemble a paper with selected questions\". Or create a blank paper first and add questions from the bank. When done, export it as Word or PDF.",
@@ -667,11 +714,17 @@ export const EN = {
 "组卷方案里没有题目。可以把要求说得具体一些再试，比如“高一期末，单选 8 道、填空 4 道、解答 5 道”": "The paper plan contains no questions. Try making the requirements more specific, e.g. \"Grade 10 final, 8 single choice, 4 fill-in, 5 free response\"",
 "考试": "Exam",
 "试卷里同一章已经有下面这些题，这道题的情境、设问和解法都要和它们不同：": "The paper already has the following questions from the same chapter; this question must differ from them in context, questioning, and solution method:",
+"题库里没有合适的题（这次只用题库里的题，不现场出）": "No suitable questions in the question bank (this time only question bank questions are used; no on-the-fly generation)",
 "已经停下，还没有挑好或出好的题": "Stopped; no questions selected or generated yet",
 "一道题也没挑到、出成，没能组成试卷": "No questions were selected or generated; could not assemble a paper",
 "补写解析": "Write solution",
+"配图位置没对准，按模型给的位置截": "Figure position missed; cropped at the model's position",
 "没有可识别的页面": "No recognizable pages",
 "先选要导入的 PDF 或图片": "Select a PDF or image to import first",
+"把这道题存进题库": "Save this question to the question bank",
+"整理对话里的题": "Sort questions in the chat",
+"找配图的位置": "Find figure positions",
+"没找到配图的位置": "No figure positions found",
 "识别题目": "Recognize questions",
 "见解析": "See solution",
 "\\s*(?:[.…·．⋯]|\\$?\\\\[cl]?dots\\$?)+\\s*\\d+(?:\\.\\d+)?\\s*分(?!钟)": "\\s*(?:[.…·．⋯]|\\$?\\\\[cl]?dots\\$?)+\\s*\\d+(?:\\.\\d+)?\\s*(?:points|pts)(?!\\s*(?:min|minutes))",
@@ -690,12 +743,17 @@ export const EN = {
 "任务不存在": "Task does not exist",
 "写一句话，或者附上图片、文件再发": "Write a message, or attach an image or file before sending",
 "存进题库要用图片或 PDF（文本文件里的题请直接复制到输入框）": "Saving to the question bank requires an image or PDF (for questions in text files, copy them directly into the input box)",
+"对话里还没有可以存的题：把题目的图片发过来，或者直接把题目打出来": "No questions to save in this chat yet. Send an image of the question, or just type it out.",
 "这张核对卡片不存在（可能对话已经删掉了）": "This review card does not exist (the chat may have been deleted)",
 "这些题已经存进题库了": "These questions have been saved to the question bank",
+"选的文件夹不存在（可能刚被删掉了），换一个再存": "The selected folder doesn't exist (it may have just been deleted). Choose another one and try again.",
 "没存进去：这些题可能已经在题库里了": "Not saved: these questions may already be in the question bank",
+"这次整理的记录不存在（可能对话已经删掉了）": "This saved record no longer exists (the chat may have been deleted).",
+"这次整理已经撤销过了": "This save has already been undone.",
 "这个对话不存在（可能已经删掉了）": "This chat does not exist (it may have been deleted)",
 "记录不存在": "Record does not exist",
 "这条建议已经不成立了（可能刚改过设置），列表已刷新": "This suggestion is no longer valid (settings may have just changed); the list has been refreshed",
+"已经有": "Already exists",
 "题库里没有这道题（可能已经删掉了）": "This question is not in the question bank (it may have been deleted)",
 "这条出题记录没有可以收进题库的题": "This generation record has no questions that can be saved to the question bank",
 "这次没整理成，题目没有改动。可以再试一次": "Failed to organize this time; the question is unchanged. You can try again.",
@@ -713,10 +771,17 @@ export const EN = {
 "题": "questions",
 "用户没有存": "User did not save",
 "等用户核对后决定存不存": "Waiting for the user to review and decide whether to save",
+"（用户后来撤销了这次整理）": "(The user later undid this save)",
 "模型没有写出摘要": "The model produced no summary",
 "上下文摘要": "Context summary",
+"文件夹名不能是空的": "Folder name cannot be empty.",
 "20XX年普通高等学校招生全国统一考试": "20XX National College Entrance Examination",
 "模拟卷（一）": "Mock Paper (1)",
+"上级文件夹不存在（可能刚被删掉了）": "The parent folder doesn't exist (it may have just been deleted).",
+"文件夹不存在（可能已经删掉了）": "Folder doesn't exist (it may have been deleted).",
+"要挪进去的文件夹不存在（可能刚被删掉了）": "The folder to move doesn't exist (it may have just been deleted).",
+"不能把文件夹挪进它自己或者它的子文件夹里": "You can't move a folder into itself or its subfolders.",
+"文件夹不存在（可能刚被删掉了）": "Folder doesn't exist (it may have just been deleted).",
 "API Key 不对或已经失效，请到「个人设置 → 模型服务」里检查": "The API Key is incorrect or expired; check it in Settings → Model services",
 "模型服务的账户余额不足，请到服务商那里充值后再试": "Insufficient balance in the model service account; top up with the provider and try again",
 "这个 API Key 没有调用这个模型的权限": "This API Key does not have permission to call this model",
@@ -1533,8 +1598,8 @@ export const EN = {
 "Context too long; compressed the previous {0} rounds into a summary"
 ],
 [
-"没能开始识别：{0}",
-"Could not start recognition: {0}"
+"没能开始整理题目：{0}",
+"Couldn't start cleanup: {0}"
 ],
 [
 "没能开始组卷：{0}",
@@ -1581,8 +1646,16 @@ export const EN = {
 "Paper assembled: {0} questions, saved to \"Papers\""
 ],
 [
-"识别出 {0} 道题，核对以后再存进题库",
-"Recognized {0} questions; review them before saving to the question bank"
+"整理出 {0} 道题，核对以后再存进题库",
+"Prepared {0} questions; review before saving to the question bank"
+],
+[
+"同时在做 {0} 件事",
+"{0} tasks in progress"
+],
+[
+"正在出 {0} 道题",
+"Generating {0} questions"
 ],
 [
 "{0} 道题，正在出下一道",
@@ -1633,6 +1706,10 @@ export const EN = {
 "Generated live {0} (all reviewed and saved to the question bank)"
 ],
 [
+"；有 {0} 道题库里没有合适的，可以在试卷里补上",
+"; {0} had no suitable question bank match and can be filled in the paper"
+],
+[
 "；有 {0} 道没出成，可以在试卷里从题库补上",
 "{0} failed to generate; you can fill them from the question bank in the paper"
 ],
@@ -1643,6 +1720,58 @@ export const EN = {
 [
 "{0}{1}。右侧是整份试卷的预览，答案和解析另起一份附在后面，可以直接导出。",
 "{0}{1}. The preview of the full paper is on the right; answers and solutions are appended separately and can be exported directly."
+],
+[
+"{0}：{1} 道题。右键可以重命名、删除",
+"{0}: {1} questions. Right-click to rename or delete"
+],
+[
+"{0}：{1} 道题，连同子文件夹一共 {2} 道。右键可以重命名、删除",
+"{0}: {1} questions, {2} including subfolders. Right-click to rename or delete"
+],
+[
+"里面的 {0} 道题会挪到{1}，题不会删。",
+"Its {0} questions will move to {1}; no questions will be deleted."
+],
+[
+"删除文件夹「{0}」？",
+"Delete folder \"{0}\"?"
+],
+[
+"把 {0} 道题移到",
+"Move {0} questions to"
+],
+[
+"在「{0}」里新建…",
+"Create new in \"{0}\"…"
+],
+[
+"已新建文件夹「{0}」",
+"Created folder \"{0}\""
+],
+[
+"「{0}」里",
+"In \"{0}\""
+],
+[
+"文件夹「{0}」挪到了{1}",
+"Folder \"{0}\" moved to {1}"
+],
+[
+"已删除文件夹「{0}」，里面的 {1} 道题挪到了{2}",
+"Deleted folder \"{0}\"; its {1} questions moved to {2}"
+],
+[
+"已删除文件夹「{0}」",
+"Deleted folder \"{0}\""
+],
+[
+"{0} 道题移到了{1}",
+"{0} questions moved to {1}"
+],
+[
+"这些题本来就在{0}",
+"These questions are already in {0}"
 ],
 [
 "知识点：{0}",
@@ -1657,12 +1786,24 @@ export const EN = {
 "Couldn't load the question bank. {0}"
 ],
 [
+"，子文件夹里还有 {0} 道",
+", with {0} more in subfolders"
+],
+[
 "，符合条件的 {0} 道",
 ", {0} matching questions"
 ],
 [
-"共 {0} 道题{1}。出好的题会自动收进来；点一道题查看或修改，勾选几道可以组成试卷。",
-"{0} questions{1}. Generated questions are added here automatically; click a question to view or edit it, or select several to assemble a paper."
+"「{0}」里有 {1} 道题{2}{3}。把题拖到上面的文件夹上，或者勾选后点\"移到文件夹\"，就能整理。",
+"\"{0}\" has {1} questions{2}{3}. Drag questions onto a folder above, or select them and click \"Move to folder\" to organize."
+],
+[
+"不在任何文件夹里的题有 {0} 道{1}。",
+"{0} questions are not in any folder{1}."
+],
+[
+"共 {0} 道题{1}。出好的题会自动收进来；点一道题查看或修改，勾选几道可以组成试卷，也可以建文件夹分类整理。",
+"{0} questions total{1}. Generated questions are added automatically; click a question to view or edit, select some to assemble a paper, or create folders to organize."
 ],
 [
 "从题库删除选中的 {0} 道题？删除后不能恢复。",
@@ -1695,6 +1836,10 @@ export const EN = {
 [
 "收进题库 {0}",
 "Added to question bank {0}"
+],
+[
+"{0} · 在「{1}」",
+"{0} · in \"{1}\""
 ],
 [
 "选项 {0}",
@@ -1765,28 +1910,36 @@ export const EN = {
 "No answer: {0}"
 ],
 [
-"识别出 {0} 道题，其中 {1} 道原题没有解析，正在请模型解出来、按标准答案的格式写好（{2} / {3}）。写好以后先给你核对，确认了才存进题库。",
-"Recognized {0} questions; {1} of them have no solutions, so the model is solving them and writing them in the standard answer format ({2} / {3}). You can review them before they're saved to the question bank."
+"{0}出 {1} 道题，其中 {2} 道还没有解析，正在请模型解出来、按标准答案的格式写好（{3} / {4}）。写好以后先给你核对，确认了才存进题库。",
+"{0} generated {1} questions; {2} have no solution yet. Asking the model to solve them in standard answer format ({3} / {4}). You'll review them before they're saved to the question bank."
 ],
 [
 "正在看第 {0} / {1} 页，已经找到 {2} 道题。识别完以后，没有解析的题会补写解析，再给你核对。",
 "Scanning page {0} / {1}, found {2} questions so far. After recognition, questions without solutions will get solutions written, then you can review them."
 ],
 [
+"，放在「{0}」",
+", in \"{0}\""
+],
+[
+"整理出 {0} 道题，请核对",
+"Prepared {0} questions; please review"
+],
+[
 "识别出 {0} 道题，请核对",
 "Recognized {0} questions, please review"
 ],
 [
-"已存入题库 {0} 道",
-"Saved {0} to the question bank"
+"已存入题库 {0} 道{1}",
+"Saved {0} questions to the question bank{1}"
 ],
 [
-"其中 {0} 道原题没有解析，是助手补写的（标着\"助手补写\"），请特别看一下。",
-"{0} of the original questions had no solution; the assistant wrote them (marked \"Assistant-written\"). Please review those carefully."
+"其中 {0} 道原来没有解析，是助手补写的（标着\"助手补写\"），请特别看一下。",
+"{0} had no solution and were written by the assistant (marked \"Assistant-written\"); please check them carefully."
 ],
 [
-"核对题目、答案和解析，勾选要存的，再点\"存入题库\"。{0}",
-"Check the questions, answers, and solutions, tick the ones to save, then click \"Save to question bank\". {0}"
+"核对题目、答案和解析，勾选要存的，选好放进哪个文件夹，再点\"存入题库\"。{0}",
+"Review the questions, answers, and solutions, select the ones to save, choose a folder, then click \"Save to question bank\". {0}"
 ],
 [
 "没识别成：{0}",
@@ -1813,6 +1966,10 @@ export const EN = {
 "Save to question bank ({0} questions)"
 ],
 [
+"新建「{0}」",
+"New \"{0}\""
+],
+[
 "{0} 没读出来",
 "Couldn't read {0}"
 ],
@@ -1823,6 +1980,10 @@ export const EN = {
 [
 "{0}（可能看不了图）",
 "{0} (may not support images)"
+],
+[
+"没能开始识别：{0}",
+"Could not start recognition: {0}"
 ],
 [
 "答案　{0}",
@@ -1847,6 +2008,38 @@ export const EN = {
 [
 "没收进去：{0}",
 "Not saved: {0}"
+],
+[
+"新建文件夹「{0}」（在「{1}」里）",
+"New folder \"{0}\" (in \"{1}\")"
+],
+[
+"新建文件夹「{0}」",
+"New folder \"{0}\""
+],
+[
+"文件夹「{0}」改名为「{1}」",
+"Folder \"{0}\" renamed to \"{1}\""
+],
+[
+"文件夹「{0}」挪到「{1}」里",
+"Folder \"{0}\" moved into \"{1}\""
+],
+[
+"文件夹「{0}」挪到最外层",
+"Folder \"{0}\" moved to top level"
+],
+[
+"删掉文件夹「{0}」，里面的 {1} 道题挪到{2}",
+"Delete folder \"{0}\"; move its {1} questions to {2}"
+],
+[
+"{0} 道题放进「{1}」",
+"{0} questions moved into \"{1}\""
+],
+[
+"{0} 道题移出文件夹，放回未归类",
+"{0} questions removed from folders; back to Uncategorized"
 ],
 [
 "导出失败（{0}）",
@@ -2161,6 +2354,10 @@ export const EN = {
 "{0} cannot be opened: only PDF and common images (PNG, JPG) are supported"
 ],
 [
+"第 {0} 张：《{1}》第 {2} 页",
+"Image {0}: \"{1}\" page {2}"
+],
+[
 "这是《{0}》第 {1} 页（共识别 {2} 页中的第 {3} 页）。",
 "This is page {1} of \"{0}\" (page {3} of {2} recognized)."
 ],
@@ -2183,6 +2380,10 @@ export const EN = {
 [
 "模型的回答没读出来（{0}），再发一次试试",
 "Couldn't read the model's reply ({0}). Try sending again"
+],
+[
+"{0}{f'（附件：{1}）' if names else ''}",
+"{0}{f' (Attachments: {1})' if names else ''}"
 ],
 [
 "摘要没写成（{0}），再试一次",
@@ -2249,6 +2450,10 @@ export const EN = {
 "Recognized {0} questions from the attachment ({1}): {2}"
 ],
 [
+"{0}{f' 改动：{1}' if done else ''}{2}",
+"{0}{f' Changes: {1}' if done else ''}{2}"
+],
+[
 "组好了一份试卷《{0}》：{1} 道题，",
 "Assembled a paper \"{0}\": {1} questions,"
 ],
@@ -2263,6 +2468,26 @@ export const EN = {
 [
 "压缩上下文（{0}）",
 "Compress context ({0})"
+],
+[
+"这里已经有叫「{0}」的文件夹了",
+"A folder named \"{0}\" already exists here."
+],
+[
+"文件夹最多套 {0} 层",
+"Folders can be nested up to {0} levels deep."
+],
+[
+"挪过去会超过 {0} 层：文件夹最多套 {1} 层",
+"Moving it would exceed {0} levels: folders can be nested up to {1} levels deep."
+],
+[
+"那里已经有叫「{0}」的文件夹了",
+"A folder named \"{0}\" already exists there."
+],
+[
+"{0}（恢复）",
+"{0} (restored)"
 ],
 [
 "模型{0}失败：请求参数一直不被接受",

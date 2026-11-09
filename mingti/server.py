@@ -16,12 +16,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mingti import context
+from mingti import context, organize
 from mingti.answer_key import condense, model_call
 from mingti.assemble import AssemblyManager
 from mingti.assistant import Assistant, bank_summary
 from mingti.attachments import AttachmentError, Uploads
-from mingti.bank import BankQuestion, BankStore, Paper
+from mingti.bank import BankQuestion, BankStore, FolderError, Paper
 from mingti.config import BLUEPRINT_JSON, CURRICULA, CURRICULUM_CSV, RUNTIME_DIR, WEB_DIR, load_settings
 from mingti.curriculum_tree import load_tree
 from mingti.export import ExportError, merge_pdfs, print_html, print_to_pdf, to_docx
@@ -54,7 +54,7 @@ bank = BankStore(RUNTIME_DIR / "bank.sqlite3", backfill_from=store.all_records)
 manager = JobManager(settings, CURRICULUM_CSV, RUNTIME_DIR, store, models, bank=bank)
 importer = ImportManager(models, bank, lambda edition: _curriculum(edition), store=store)
 uploads = Uploads()
-assistant = Assistant(models, store, manager.model_runs, uploads=uploads)
+assistant = Assistant(models, store, manager.model_runs, uploads=uploads, bank=bank)
 assemblies = AssemblyManager(manager, bank, store, models, lambda edition: _curriculum(edition), lambda: profiles.load())
 
 app = FastAPI(title="命题智能体")
@@ -309,13 +309,20 @@ def ask_assistant(payload: AssistantRequest) -> dict:
             thinking=payload.thinking,
             touched=payload.touched,
             current=payload.current,
+            # 用户是老师：年级是他任教的年级，不是他自己在读的年级
             profile={
                 "name": profile.display_name,
-                "grade": profile.grade,
+                "teaching_grade": profile.grade,
                 "textbook": CURRICULA.get(profile.textbook, CURRICULA["pep_a"])[0],
             },
-            bank={**bank_summary(bank.items()), "papers": bank.counts()["papers"]},
+            bank={
+                **bank_summary(bank.items()),
+                "papers": bank.counts()["papers"],
+                "folders": [folder["name"] for folder in bank.folders()][:60],
+            },
         )
+    except FolderError as exc:
+        raise HTTPException(400, str(exc)) from exc
     except AttachmentError as exc:
         raise HTTPException(400, str(exc)) from exc
     except DeepSeekClientError as exc:
@@ -344,34 +351,77 @@ def upload_attachment(payload: UploadRequest) -> dict:
 
 class ChatImportRequest(BaseModel):
     session_id: str = Field(default="", max_length=40)
-    uploads: list[str] = Field(min_length=1, max_length=10)
+    # 这条消息的附件；空的表示要存的题在前文里（之前发的图片、文字，或者助手解过的题）
+    uploads: list[str] = Field(default_factory=list, max_length=10)
     text: str = Field(default="", max_length=4000)
     model: str | None = Field(default=None, max_length=160)
     thinking: Literal["low", "medium", "high", "max"] = "medium"
     edition: Literal["pep_a", "pep_b"] | None = None
+    folder: str | None = Field(default=None, max_length=30)  # 用户说了存到哪个文件夹（文件夹名）
+
+
+CONVERSATION_TURNS = 6  # 从对话里存题时带上最近几轮聊天
+CONVERSATION_CHARS = 16000
+
+
+def _conversation(session_id: str) -> tuple[list[dict], list[str]]:
+    """从对话里存题要用的前文：最近几轮聊天（你说的话 + 助手的回答），以及这几轮里附过的图片、PDF 的编号（新的在后）。"""
+    chats = [entry for entry in store.session(session_id) if entry.get("kind") == "chat"][-CONVERSATION_TURNS:]
+    lines: list[dict] = []
+    upload_ids: list[str] = []
+    for entry in chats:
+        files = [item for item in entry.get("attachments") or [] if item.get("kind") in ("image", "pdf")]
+        upload_ids += [item["id"] for item in files if item.get("id")]
+        names = "、".join(item.get("name", "") for item in entry.get("attachments") or [])
+        lines.append({"role": "user", "content": f"{entry.get('text') or ''}{f'（附件：{names}）' if names else ''}"})
+        lines.append({"role": "assistant", "content": entry.get("reply") or ""})
+    # 太长就从最早的往后丢，最近的一问一答总是留着
+    while len(lines) > 2 and sum(len(line["content"]) for line in lines) > CONVERSATION_CHARS:
+        lines = lines[2:]
+    return lines, upload_ids
 
 
 @app.post("/api/chat-imports")
 def start_chat_import(payload: ChatImportRequest) -> dict:
-    """把附件里的题存进题库：识别题目，没有解析的补写解析，做完存成对话里的一张核对卡片，用户确认后才存。"""
+    """把题存进题库：附件里的题逐页识别；没带附件就从前文里把讨论过的题和解答整理出来。
+    没有解析的补写解析，做完存成对话里的一张核对卡片，用户确认后才存。"""
     if not models.options:
         raise HTTPException(503, NO_MODEL)
     session_id = _session_id(payload.session_id)
+    edition = payload.edition or profiles.load().textbook
+    chat = {
+        "session_id": session_id,
+        "message_id": f"m_{uuid.uuid4().hex[:12]}",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "text": payload.text.strip(),
+        "attachments": [],
+        "thinking": payload.thinking,
+        "folder": (payload.folder or "").strip() or None,
+    }
     try:
-        files = uploads.files(payload.uploads)
-        if not files:
-            raise AttachmentError("存进题库要用图片或 PDF（文本文件里的题请直接复制到输入框）")
-        vision = assistant.vision_route(payload.model)
-        chat = {
-            "session_id": session_id,
-            "message_id": f"m_{uuid.uuid4().hex[:12]}",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "text": payload.text.strip(),
-            "attachments": assistant.attachment_cards(payload.uploads),
-            "thinking": payload.thinking,
-            "solver_model": payload.model or vision.id,
-        }
-        job = importer.start(files, vision.id, payload.edition or profiles.load().textbook, chat=chat)
+        if payload.uploads:
+            files = uploads.files(payload.uploads)
+            if not files:
+                raise AttachmentError("存进题库要用图片或 PDF（文本文件里的题请直接复制到输入框）")
+            vision = assistant.vision_route(payload.model)
+            chat.update(attachments=assistant.attachment_cards(payload.uploads), solver_model=payload.model or vision.id)
+            job = importer.start(files, vision.id, edition, chat=chat)
+        else:
+            lines, upload_ids = _conversation(session_id)
+            if not lines:
+                raise ImportError_("对话里还没有可以存的题：把题目的图片发过来，或者直接把题目打出来")
+            # 前文里附过的图片还在（4 小时内、服务没重启过）：带上原图，题干照原图录、配图从原图上截
+            files = []
+            for upload_id in reversed(upload_ids):
+                try:
+                    files = uploads.files([upload_id]) + files
+                except AttachmentError:
+                    continue
+                if len(files) >= 4:
+                    break
+            route = assistant.vision_route(payload.model) if files else models.route(payload.model)
+            chat["solver_model"] = payload.model or route.id
+            job = importer.start_from_chat(lines, payload.text.strip(), files, route.id, edition, chat=chat)
     except (AttachmentError, ImportError_) as exc:
         raise HTTPException(400, str(exc)) from exc
     return {**importer.snapshot(job), "session_id": session_id}
@@ -380,6 +430,8 @@ def start_chat_import(payload: ChatImportRequest) -> dict:
 class ImportDecision(BaseModel):
     indexes: list[int] = Field(default_factory=list, max_length=400)  # 要存的题（核对卡片上勾选的）
     decline: bool = False  # 不存了
+    folder_id: str | None = Field(default=None, max_length=40)  # 存进哪个文件夹（空：未归类）
+    folder_name: str | None = Field(default=None, max_length=30)  # 或者新建一个这个名字的文件夹再存进去
 
 
 @app.post("/api/messages/{message_id}/import")
@@ -392,15 +444,43 @@ def decide_chat_import(message_id: str, payload: ImportDecision) -> dict:
         raise HTTPException(409, "这些题已经存进题库了")
     questions = message.get("questions") or []
     saved = []
+    folder = None
     if not payload.decline:
+        try:
+            if payload.folder_id:
+                folder = bank.folder(payload.folder_id)
+                if folder is None:
+                    raise FolderError("选的文件夹不存在（可能刚被删掉了），换一个再存")
+            elif (payload.folder_name or "").strip():
+                folder = bank.create_folder(payload.folder_name, None, reuse=True)
+        except FolderError as exc:
+            raise HTTPException(400, str(exc)) from exc
         for index in payload.indexes:
-            if 0 <= index < len(questions) and bank.add_imported(questions[index], source_id=f"import:{message.get('import_id')}:{index}"):
+            if 0 <= index < len(questions) and bank.add_imported(
+                questions[index], source_id=f"import:{message.get('import_id')}:{index}",
+                folder_id=folder["id"] if folder else None,
+            ):
                 saved.append(index)
         if payload.indexes and not saved:
             raise HTTPException(409, "没存进去：这些题可能已经在题库里了")
-    message.update(status="declined" if payload.decline else "saved", saved=len(saved), saved_indexes=saved)
+    message.update(status="declined" if payload.decline else "saved", saved=len(saved), saved_indexes=saved,
+                   saved_folder={"id": folder["id"], "name": folder["name"]} if folder else None)
     store.save_message(message)
     return {"message": message, "saved": len(saved), "counts": bank.counts()}
+
+
+@app.post("/api/messages/{message_id}/undo")
+def undo_organize(message_id: str) -> dict:
+    """撤销一次整理题库（对话里助手建的文件夹、挪的题，全部恢复原样）。"""
+    message = store.get_message(message_id)
+    if message is None or message.get("kind") != "organize":
+        raise HTTPException(404, "这次整理的记录不存在（可能对话已经删掉了）")
+    if message.get("status") == "undone":
+        raise HTTPException(409, "这次整理已经撤销过了")
+    organize.undo(bank, message.get("undo") or [])
+    message.update(status="undone")
+    store.save_message(message)
+    return {"message": message, "folders": bank.folders()}
 
 
 # ---------- 上下文：这个对话带给模型的前文有多长；可以把前面的内容压缩成摘要 ----------
@@ -500,6 +580,9 @@ class AssemblyRequest(BaseModel):
     session_id: str = Field(default="", max_length=40)
     config: dict = Field(default_factory=dict)
     meta: dict = Field(default_factory=dict)
+    # 题目从哪来：auto 按老师的说法判断（定方案时一起定）；original 全部现场出新题；
+    # bank_first 先从题库挑、不够的现场出；bank_only 只用题库里的题
+    source: Literal["auto", "original", "bank_first", "bank_only"] = "auto"
 
 
 @app.post("/api/assemblies")
@@ -509,6 +592,7 @@ def create_assembly(payload: AssemblyRequest) -> dict:
     meta = {
         "edition": payload.meta.get("edition") if payload.meta.get("edition") in CURRICULA else profiles.load().textbook,
         "detail": payload.meta.get("detail") or profiles.load().defaults.solution_detail,
+        "source": payload.source,
     }
     assembly = assemblies.start(payload.text, _session_id(payload.session_id), payload.config, meta)
     return assemblies.snapshot(assembly)
@@ -639,7 +723,71 @@ def counts() -> dict:
 
 @app.get("/api/bank")
 def bank_items() -> dict:
-    return {"items": bank.items(), "counts": bank.counts()}
+    return {"items": bank.items(), "folders": bank.folders(), "counts": bank.counts()}
+
+
+# ---------- 题库的文件夹：老师自己建的分类，可以一层套一层；删文件夹不删题 ----------
+
+
+class FolderIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    parent_id: str | None = Field(default=None, max_length=40)
+
+
+class FolderPatch(BaseModel):
+    name: str | None = Field(default=None, max_length=60)
+    move: bool = False  # 为真时按 parent_id 挪（parent_id 为空 = 挪到最外层）
+    parent_id: str | None = Field(default=None, max_length=40)
+
+
+class MoveItems(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=2000)
+    folder_id: str | None = Field(default=None, max_length=40)  # 空：移出文件夹（未归类）
+
+
+@app.get("/api/bank/folders")
+def bank_folders() -> dict:
+    return {"folders": bank.folders()}
+
+
+@app.post("/api/bank/folders")
+def create_bank_folder(payload: FolderIn) -> dict:
+    try:
+        folder = bank.create_folder(payload.name, payload.parent_id)
+    except FolderError as exc:
+        raise HTTPException(409 if "已经有" in str(exc) else 400, str(exc)) from exc
+    return {"folder": folder, "folders": bank.folders()}
+
+
+@app.patch("/api/bank/folders/{folder_id}")
+def update_bank_folder(folder_id: str, payload: FolderPatch) -> dict:
+    try:
+        if payload.name is not None:
+            bank.rename_folder(folder_id, payload.name)
+        if payload.move:
+            bank.move_folder(folder_id, payload.parent_id)
+    except FolderError as exc:
+        raise HTTPException(409 if "已经有" in str(exc) else 400, str(exc)) from exc
+    return {"folders": bank.folders()}
+
+
+@app.delete("/api/bank/folders/{folder_id}")
+def delete_bank_folder(folder_id: str) -> dict:
+    """删文件夹不删题：里面的题和子文件夹挪到上一级。"""
+    try:
+        info = bank.delete_folder(folder_id)
+    except FolderError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"moved_items": len(info["items"]), "moved_folders": len(info["children"]), "folders": bank.folders()}
+
+
+@app.post("/api/bank/move")
+def move_bank_items(payload: MoveItems) -> dict:
+    try:
+        moved = bank.move_items(payload.ids, payload.folder_id)
+    except FolderError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"moved": len(moved), "folders": bank.folders()}
 
 
 @app.get("/api/bank/{item_id}")

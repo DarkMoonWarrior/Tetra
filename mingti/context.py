@@ -115,6 +115,16 @@ def turns(entries: list[dict]) -> list[dict]:
                             "lines": [{"role": "user", "content": _clip(f"{entry.get('text') or '把题存进题库'}{attached}", 600)},
                                       {"role": "assistant", "content": _clip(reply, 1500)}]})
             continue
+        if kind == "organize":
+            from mingti.organize import describe
+
+            done = "；".join(filter(None, (describe(change) for change in entry.get("changes") or [])))
+            undone = "（用户后来撤销了这次整理）" if entry.get("status") == "undone" else ""
+            reply = f"{entry.get('reply') or ''}{f' 改动：{done}' if done else ''}{undone}"
+            grouped.append({"kind": kind, "at": at, "end": at,
+                            "lines": [{"role": "user", "content": _clip(entry.get("text"), 600)},
+                                      {"role": "assistant", "content": _clip(reply, 1500)}]})
+            continue
         if kind == "paper":
             paper = entry.get("paper") or {}
             slots = "；".join(

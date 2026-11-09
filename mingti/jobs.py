@@ -318,8 +318,10 @@ class JobManager:
         self._jobs: dict[str, Job] = {}
         self._batches: dict[str, Batch] = {}
         self._lock = threading.Lock()
+        # 几个对话可以同时出题：线程池按整个服务的上限开（默认 8 道），超出的排队；
+        # 一批题、一份试卷里同时出几道另由 max_parallel_jobs 管（见 submit_batch、assemble.py）
         self._executor = ThreadPoolExecutor(
-            max_workers=settings.max_parallel_jobs,
+            max_workers=max(settings.max_running_jobs, settings.max_parallel_jobs),
             thread_name_prefix="mingti-job",
         )
 

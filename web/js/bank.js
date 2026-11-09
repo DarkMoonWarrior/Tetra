@@ -1,12 +1,19 @@
 // 题库：出好的题自动收进来；可以修改、删除，也可以勾选几道组成试卷。
 // 中间是题目列表，右栏显示选中的那道题，点"修改"在右栏里直接改。
+// 文件夹：自己建分类，可以一层套一层。列表上面是文件夹条（所在位置 + 下一层的文件夹）；
+// 勾选几道点"移到文件夹"，或者直接把题拖到文件夹上；文件夹也能拖进别的文件夹。删文件夹不删题。
 
 import {
-  $, DIFFICULTY_LABEL, GRADES, TYPE_LABEL, el, formatWhen, mathText, normalize, renderMath, request, segmented, toast,
+  $, DIFFICULTY_LABEL, GRADES, TYPE_LABEL, el, formatWhen, mathText, normalize, renderMath, request, segmented, svg, toast,
 } from './shared.js';
 import { buildSheet } from './sheet.js';
 import { profile } from './settings.js';
 import { openImporter } from './importer.js';
+import { folderOptions } from './importcard.js';
+
+const FOLDER_KEY = 'mingti.bank-folder'; // 上次看的是哪个文件夹（all 全部、none 未归类，或文件夹编号）
+const DRAG_ITEMS = 'application/x-tetra-items';
+const DRAG_FOLDER = 'application/x-tetra-folder';
 
 const CHOICE = new Set(['single_choice', 'multiple_choice']);
 const oneLine = (text) => String(text || '').replace(/\$\$/g, '$').replace(/\s*\n+\s*/g, ' ');
@@ -106,16 +113,25 @@ export class Library {
     this.confirming = false;
     this.confirmingBulk = false;
     this.figuring = false;
+    this.folders = [];
+    this.folder = (() => { try { return localStorage.getItem(FOLDER_KEY) || 'all'; } catch { return 'all'; } })();
+    this.naming = null; // 正在起名的文件夹：{ parent }（新建）或 { folder }（改名）
+    this.menu = null; // 打开着的小菜单（文件夹的"更多"、移到文件夹）
     this.build();
   }
 
   build() {
     const head = el('header', 'view-head');
     this.lead = el('p', 'view-lead');
-    // 标题旁边：导入题目（上传 PDF、图片，识别出题目收进题库）
+    // 标题旁边：导入题目（上传 PDF、图片，识别出题目收进题库）、新建文件夹
     const title = el('div', 'view-title');
-    title.append(el('h1', '', '题库'), button('导入题目', 'btn', () => openImporter({ onSaved: () => this.show() })));
+    title.append(
+      el('h1', '', '题库'),
+      button('导入题目', 'btn', () => openImporter({ onSaved: () => this.show() })),
+      button('新建文件夹', 'btn', () => this.startNaming({ parent: this.folderId() })),
+    );
     head.append(title, this.lead);
+    this.folderBar = el('div', 'folder-bar');
 
     const tools = el('div', 'bank-tools');
     const search = el('input', 'text-input');
@@ -165,7 +181,389 @@ export class Library {
     this.list = el('ul', 'bank-list');
     this.bar = el('div', 'pick-bar');
     this.bar.hidden = true;
-    this.root.append(head, tools, this.treePanel, this.list, this.bar);
+    this.root.append(head, this.folderBar, tools, this.treePanel, this.list, this.bar);
+    // 小菜单：点在外面、按 Esc、滚动列表时收起
+    document.addEventListener('pointerdown', (event) => {
+      if (this.menu && !event.composedPath().includes(this.menu)) this.closeMenu();
+    }, true);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && this.menu) {
+        event.stopPropagation();
+        this.closeMenu(true);
+      }
+    }, true);
+    window.addEventListener('resize', () => this.closeMenu());
+  }
+
+  // ---------- 文件夹 ----------
+
+  // 当前看的是哪个文件夹：文件夹编号；看"全部题目""未归类"时是 null
+  folderId() {
+    return this.folder !== 'all' && this.folder !== 'none' ? this.folder : null;
+  }
+
+  folderById(id) {
+    return this.folders.find((folder) => folder.id === id) || null;
+  }
+
+  // 从最外层到这个文件夹的一串文件夹
+  folderPath(id) {
+    const path = [];
+    const seen = new Set();
+    let node = this.folderById(id);
+    while (node && !seen.has(node.id)) {
+      seen.add(node.id);
+      path.unshift(node);
+      node = this.folderById(node.parent_id);
+    }
+    return path;
+  }
+
+  childrenOf(parentId) {
+    return this.folders.filter((folder) => (folder.parent_id || null) === (parentId || null))
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+  }
+
+  openFolder(view) {
+    this.folder = view || 'all';
+    try { localStorage.setItem(FOLDER_KEY, this.folder); } catch { /* 存不了就只在这次有效 */ }
+    this.naming = null;
+    this.closeMenu();
+    const items = this.visible();
+    if (!items.some((item) => item.id === this.current)) {
+      this.current = items[0]?.id || null;
+      this.editing = false;
+      this.confirming = false;
+      this.figuring = false;
+      this.renderPanel();
+    }
+    this.renderList();
+  }
+
+  // 文件夹条：第一行是所在位置（全部题目 › 期中复习 › 函数），第二行是下一层的文件夹和"新建文件夹"。
+  // 每个文件夹（和位置上的每一级）都能把题拖上去；文件夹也能拖到别的文件夹上
+  renderFolders() {
+    const bar = this.folderBar;
+    bar.replaceChildren();
+    const here = this.folderId();
+    const path = here ? this.folderPath(here) : [];
+    const unfiled = this.items.filter((item) => !item.folder_id).length;
+
+    const trail = el('nav', 'folder-path');
+    trail.setAttribute('aria-label', '文件夹位置');
+    const crumb = (label, view, target) => {
+      const current = this.folder === view;
+      const node = button(label, `folder-crumb${current ? ' on' : ''}`, () => this.openFolder(view));
+      node.setAttribute('aria-current', String(current));
+      if (target !== undefined) this.dropTarget(node, target);
+      return node;
+    };
+    trail.append(crumb('全部题目', 'all', null));
+    if (this.folder === 'none') trail.append(el('span', 'folder-sep', '›'), crumb('未归类', 'none'));
+    for (const folder of path) trail.append(el('span', 'folder-sep', '›'), crumb(folder.name, folder.id, folder.id));
+    if (here) {
+      const more = el('button', 'folder-more');
+      more.type = 'button';
+      more.innerHTML = svg('more');
+      more.title = '这个文件夹：重命名、新建子文件夹、删除';
+      more.setAttribute('aria-label', '文件夹操作');
+      more.addEventListener('click', () => this.folderMenu(this.folderById(here), more));
+      trail.append(more);
+    }
+    bar.append(trail);
+
+    if (this.folder === 'none') return;
+    const chips = el('div', 'folder-chips');
+    if (this.folder === 'all') {
+      const loose = button('', `folder-chip loose${unfiled ? '' : ' empty'}`, () => this.openFolder('none'));
+      loose.append(el('span', 'folder-name', '未归类'), el('span', 'folder-count', String(unfiled)));
+      loose.title = '不在任何文件夹里的题；把题拖到这里就移出文件夹';
+      this.dropTarget(loose, null);
+      chips.append(loose);
+    }
+    for (const folder of this.childrenOf(here)) {
+      if (this.naming?.folder?.id === folder.id) {
+        chips.append(this.nameInput(folder.name));
+        continue;
+      }
+      const chip = button('', 'folder-chip', () => this.openFolder(folder.id));
+      chip.insertAdjacentHTML('afterbegin', svg('folder'));
+      chip.append(el('span', 'folder-name', folder.name), el('span', 'folder-count', String(folder.total)));
+      chip.title = folder.total === folder.count ? `${folder.name}：${folder.count} 道题。右键可以重命名、删除`
+        : `${folder.name}：${folder.count} 道题，连同子文件夹一共 ${folder.total} 道。右键可以重命名、删除`;
+      chip.draggable = true;
+      chip.addEventListener('dragstart', (event) => {
+        event.dataTransfer.setData(DRAG_FOLDER, folder.id);
+        event.dataTransfer.effectAllowed = 'move';
+      });
+      chip.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        this.folderMenu(folder, chip, event);
+      });
+      this.dropTarget(chip, folder.id);
+      chips.append(chip);
+    }
+    if (this.naming && !this.naming.folder && (this.naming.parent || null) === here) chips.append(this.nameInput(''));
+    else {
+      const add = button('', 'folder-chip add', () => this.startNaming({ parent: here }));
+      add.insertAdjacentHTML('afterbegin', svg('folder-plus'));
+      add.append(el('span', 'folder-name', here ? '新建子文件夹' : '新建文件夹'));
+      chips.append(add);
+    }
+    bar.append(chips);
+  }
+
+  // 起名的输入框（新建或改名）：回车保存，Esc 或点到别处取消（点到别处时写了名字就保存）
+  nameInput(value) {
+    const wrap = el('span', 'folder-chip naming');
+    const input = el('input', 'folder-input');
+    input.type = 'text';
+    input.maxLength = 30;
+    input.value = value;
+    input.placeholder = '文件夹名';
+    input.setAttribute('aria-label', '文件夹名');
+    wrap.append(input);
+    let done = false;
+    const finish = (keep) => {
+      if (done) return;
+      done = true;
+      const naming = this.naming;
+      this.naming = null;
+      const name = input.value.trim();
+      if (!keep || !name || (naming?.folder && name === naming.folder.name)) {
+        this.renderFolders();
+        return;
+      }
+      if (naming?.folder) this.renameFolder(naming.folder, name);
+      else this.createFolder(name, naming?.parent || null);
+    };
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.isComposing) {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        finish(false);
+      }
+    });
+    input.addEventListener('blur', () => finish(true));
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+    return wrap;
+  }
+
+  startNaming(naming) {
+    this.closeMenu();
+    // 在"未归类"里点新建：建在最外层，回到"全部题目"才看得到
+    if (this.folder === 'none') this.folder = 'all';
+    this.naming = naming;
+    this.renderFolders();
+  }
+
+  // 把题（或文件夹）拖到这里：target 是文件夹编号，null 表示移出文件夹（未归类）/ 挪到最外层
+  dropTarget(node, target) {
+    node.addEventListener('dragover', (event) => {
+      const types = [...(event.dataTransfer?.types || [])];
+      if (!types.includes(DRAG_ITEMS) && !types.includes(DRAG_FOLDER)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      node.classList.add('drop');
+    });
+    node.addEventListener('dragleave', () => node.classList.remove('drop'));
+    node.addEventListener('drop', (event) => {
+      node.classList.remove('drop');
+      const items = event.dataTransfer.getData(DRAG_ITEMS);
+      const folder = event.dataTransfer.getData(DRAG_FOLDER);
+      if (!items && !folder) return;
+      event.preventDefault();
+      if (items) this.moveItems(JSON.parse(items), target);
+      else if (folder && folder !== target) this.moveFolder(folder, target);
+    });
+  }
+
+  // 小菜单（文件夹的操作、移到文件夹）：放在 anchor 下面，或者鼠标右键的位置
+  openMenu(anchor, build, event = null) {
+    this.closeMenu();
+    const menu = el('div', 'popover rail-menu bank-menu');
+    menu.setAttribute('role', 'menu');
+    this.menu = menu;
+    this.menuAnchor = anchor;
+    document.body.append(menu);
+    const place = () => {
+      const box = menu.getBoundingClientRect();
+      const at = anchor.getBoundingClientRect();
+      const x = event?.clientX || at.left;
+      // 下面放不下（比如从底部的选择栏打开）就往上弹，不盖住按钮
+      let y = event?.clientY || at.bottom + 4;
+      if (!event && y + box.height > window.innerHeight - 8 && at.top - box.height - 4 >= 8) y = at.top - box.height - 4;
+      menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - box.width - 8))}px`;
+      menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - box.height - 8))}px`;
+    };
+    build(menu, place);
+    place();
+    menu.querySelector('button')?.focus({ preventScroll: true });
+  }
+
+  closeMenu(restoreFocus = false) {
+    if (!this.menu) return;
+    this.menu.remove();
+    this.menu = null;
+    if (restoreFocus) this.menuAnchor?.focus();
+    this.menuAnchor = null;
+  }
+
+  menuItem(label, icon, onClick, className = '') {
+    const node = el('button', `rail-menu-item${className ? ` ${className}` : ''}`);
+    node.type = 'button';
+    node.setAttribute('role', 'menuitem');
+    node.innerHTML = svg(icon);
+    node.append(el('span', '', label));
+    node.addEventListener('click', onClick);
+    return node;
+  }
+
+  // 一个文件夹的操作：打开、重命名、新建子文件夹、删除（删除先在菜单里确认：题不会删，挪到上一级）
+  folderMenu(folder, anchor, event = null) {
+    if (!folder) return;
+    this.openMenu(anchor, (menu, place) => {
+      const main = () => {
+        menu.replaceChildren(
+          this.menuItem('打开', 'folder', () => { this.closeMenu(); this.openFolder(folder.id); }),
+          this.menuItem('重命名', 'pencil', () => {
+            this.closeMenu();
+            // 改名的输入框放在下一层的文件夹那一行：当前打开的就是它时，先回到它的上一级
+            if (this.folder === folder.id) this.folder = folder.parent_id || 'all';
+            this.naming = { folder };
+            this.renderList();
+          }),
+          this.menuItem('新建子文件夹', 'folder-plus', () => {
+            this.closeMenu();
+            this.folder = folder.id;
+            this.naming = { parent: folder.id };
+            this.renderList();
+          }),
+          this.menuItem('删除文件夹', 'trash', confirm, 'danger'),
+        );
+        place();
+      };
+      const confirm = () => {
+        const box = el('div', 'rail-confirm');
+        const where = folder.parent_id ? `「${this.folderById(folder.parent_id)?.name || '上一级'}」` : '未归类';
+        const inside = folder.total ? `里面的 ${folder.total} 道题会挪到${where}，题不会删。` : '这是个空文件夹。';
+        const subs = this.childrenOf(folder.id).length ? '子文件夹也挪到上一级。' : '';
+        box.append(el('p', 'ask', `删除文件夹「${folder.name}」？`), el('p', 'note', `${inside}${subs}`));
+        const actions = el('div', 'rail-confirm-actions');
+        const cancel = button('取消', 'btn', main);
+        actions.append(cancel, button('删除', 'btn danger', () => this.deleteFolder(folder)));
+        box.append(actions);
+        menu.replaceChildren(box);
+        place();
+        cancel.focus();
+      };
+      main();
+    }, event);
+  }
+
+  // 移到文件夹：未归类、各个文件夹（子文件夹缩进），以及新建一个再移进去
+  moveMenu(anchor, ids) {
+    if (!ids.length) return;
+    const inOne = new Set(ids.map((id) => this.item(id)?.folder_id || null));
+    const only = inOne.size === 1 ? [...inOne][0] : undefined; // 这些题现在都在同一个地方
+    this.openMenu(anchor, (menu, place) => {
+      menu.classList.add('move-menu');
+      menu.append(el('p', 'pop-title', ids.length > 1 ? `把 ${ids.length} 道题移到` : '移到'));
+      const list = el('div', 'move-list');
+      const unfiled = this.menuItem('未归类（不放在文件夹里）', 'file', () => { this.closeMenu(); this.moveItems(ids, null); });
+      unfiled.disabled = only === null;
+      list.append(unfiled);
+      for (const { folder, depth } of folderOptions(this.folders)) {
+        const item = this.menuItem(folder.name, 'folder', () => { this.closeMenu(); this.moveItems(ids, folder.id); });
+        item.style.paddingLeft = `${10 + depth * 16}px`;
+        item.disabled = only === folder.id;
+        list.append(item);
+      }
+      menu.append(list);
+      // 新建一个文件夹再移进去（建在当前打开的文件夹里）
+      const form = el('form', 'move-new');
+      const input = el('input', 'folder-input');
+      input.type = 'text';
+      input.maxLength = 30;
+      input.placeholder = this.folderId() ? `在「${this.folderById(this.folderId())?.name}」里新建…` : '新建文件夹…';
+      input.setAttribute('aria-label', '新建文件夹再移进去');
+      const go = el('button', 'btn', '新建并移入');
+      go.type = 'submit';
+      form.append(input, go);
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const name = input.value.trim();
+        if (!name) {
+          input.focus();
+          return;
+        }
+        this.closeMenu();
+        const folder = await this.createFolder(name, this.folderId(), { quiet: true });
+        if (folder) this.moveItems(ids, folder.id);
+      });
+      menu.append(form);
+      place();
+    });
+  }
+
+  async folderRequest(url, options, success) {
+    try {
+      const data = await request(url, options);
+      if (data.folders) this.folders = data.folders;
+      if (success) toast(success);
+      return data;
+    } catch (error) {
+      toast(error.message);
+      return null;
+    }
+  }
+
+  async createFolder(name, parent, { quiet = false } = {}) {
+    const data = await this.folderRequest('/api/bank/folders', { method: 'POST', body: JSON.stringify({ name, parent_id: parent }) },
+      quiet ? null : `已新建文件夹「${name}」`);
+    this.renderList();
+    return data?.folder || null;
+  }
+
+  async renameFolder(folder, name) {
+    await this.folderRequest(`/api/bank/folders/${folder.id}`, { method: 'PATCH', body: JSON.stringify({ name }) }, '已重命名');
+    this.renderList();
+  }
+
+  async moveFolder(id, parent) {
+    const folder = this.folderById(id);
+    const into = parent ? `「${this.folderById(parent)?.name || ''}」里` : '最外层';
+    await this.folderRequest(`/api/bank/folders/${id}`, { method: 'PATCH', body: JSON.stringify({ move: true, parent_id: parent }) },
+      `文件夹「${folder?.name || ''}」挪到了${into}`);
+    this.renderList();
+  }
+
+  async deleteFolder(folder) {
+    this.closeMenu();
+    const data = await this.folderRequest(`/api/bank/folders/${folder.id}`, { method: 'DELETE' });
+    if (!data) return;
+    // 题挪到了上一级：重新读一遍题库（题上记着在哪个文件夹）
+    await this.load().catch(() => {});
+    if (this.folderId() && !this.folderById(this.folderId())) this.folder = folder.parent_id || 'all';
+    this.openFolder(this.folder);
+    const parent = folder.parent_id ? this.folderById(folder.parent_id) : null;
+    const where = parent ? `「${parent.name}」` : '未归类';
+    toast(data.moved_items ? `已删除文件夹「${folder.name}」，里面的 ${data.moved_items} 道题挪到了${where}` : `已删除文件夹「${folder.name}」`);
+  }
+
+  async moveItems(ids, folderId) {
+    const data = await this.folderRequest('/api/bank/move', { method: 'POST', body: JSON.stringify({ ids, folder_id: folderId }) });
+    if (!data) return;
+    for (const item of this.items) if (ids.includes(item.id)) item.folder_id = folderId;
+    const name = folderId ? `「${this.folderById(folderId)?.name || ''}」` : '未归类';
+    this.picked.clear();
+    this.confirmingBulk = false;
+    this.renderList();
+    this.renderPanel();
+    toast(data.moved ? `${data.moved} 道题移到了${name}` : `这些题本来就在${name}`);
   }
 
   // 教材目录（按个人设置里的教材版本）：每个知识点名称的先后顺序，以及考点名称对应的完整路径
@@ -275,27 +673,35 @@ export class Library {
   async load() {
     const [data] = await Promise.all([request('/api/bank'), this.loadTree()]);
     this.items = data.items;
+    this.folders = data.folders || [];
     this.shell.setCounts(data.counts);
     const alive = new Set(this.items.map((item) => item.id));
     for (const id of this.picked) if (!alive.has(id)) this.picked.delete(id);
+    // 上次看的文件夹已经删掉了：回到全部题目
+    if (this.folderId() && !this.folderById(this.folderId())) this.folder = 'all';
   }
 
   item(id) {
     return this.items.find((item) => item.id === id) || null;
   }
 
-  // focus：要打开的题（题库编号或出题记录编号）
-  async show(focus = null) {
+  // focus：要打开的题（题库编号或出题记录编号）；folder：要打开的文件夹（对话里整理完、存完题点"在题库里查看"时）
+  async show(focus = null, { folder = null } = {}) {
     try {
       await this.load();
     } catch (error) {
       // 读不到就明说没加载出来，不能显示成"题库还是空的"
       this.lead.textContent = '';
       this.bar.hidden = true;
+      this.folderBar.replaceChildren();
       this.list.replaceChildren(el('li', 'bank-empty', `题库没加载出来。${error.message}`));
       return;
     }
+    this.naming = null;
+    if (folder && this.folderById(folder)) this.folder = folder;
     const target = focus && this.items.find((item) => item.id === focus || item.source_id === focus);
+    // 要看的那道题不在当前打开的文件夹里：回到全部题目
+    if (target && !this.visible().some((item) => item.id === target.id)) this.folder = 'all';
     if (target) this.current = target.id;
     else if (!this.item(this.current)) this.current = this.visible()[0]?.id || null;
     this.editing = false;
@@ -306,11 +712,13 @@ export class Library {
     if (target) this.root.querySelector(`[data-id="${target.id}"]`)?.scrollIntoView({ block: 'center' });
   }
 
-  // ignoreKp：不按知识点筛（算知识点目录里的数量时用）
+  // ignoreKp：不按知识点筛（算知识点目录里的数量时用）。文件夹：只看直接放在这个文件夹里的题
   visible({ ignoreKp = false } = {}) {
     const { q, type, difficulty, kp } = this.filters;
     const key = normalize(q);
-    return this.items.filter((item) => (!type || item.question_type === type)
+    const view = this.folder;
+    return this.items.filter((item) => (view === 'all' || (view === 'none' ? !item.folder_id : item.folder_id === view))
+      && (!type || item.question_type === type)
       && (!difficulty || item.difficulty === difficulty)
       && (ignoreKp || !kp.length || startsWith(this.pathFor(item), kp))
       && (!key || normalize(item.stem).includes(key) || normalize(item.knowledge).includes(key)));
@@ -318,17 +726,27 @@ export class Library {
 
   renderList() {
     const items = this.visible();
-    const filtered = items.length !== this.items.length;
-    this.lead.textContent = this.items.length
-      ? `共 ${this.items.length} 道题${filtered ? `，符合条件的 ${items.length} 道` : ''}。出好的题会自动收进来；点一道题查看或修改，勾选几道可以组成试卷。`
-      : '';
+    const here = this.folderId();
+    const inView = this.folder === 'all' ? this.items.length
+      : this.items.filter((item) => (this.folder === 'none' ? !item.folder_id : item.folder_id === here)).length;
+    const filtered = items.length !== inView;
+    const folder = here ? this.folderById(here) : null;
+    const nested = folder ? folder.total - folder.count : 0;
+    if (!this.items.length) this.lead.textContent = '';
+    else if (folder) this.lead.textContent = `「${folder.name}」里有 ${folder.count} 道题${nested ? `，子文件夹里还有 ${nested} 道` : ''}${filtered ? `，符合条件的 ${items.length} 道` : ''}。把题拖到上面的文件夹上，或者勾选后点"移到文件夹"，就能整理。`;
+    else if (this.folder === 'none') this.lead.textContent = `不在任何文件夹里的题有 ${inView} 道${filtered ? `，符合条件的 ${items.length} 道` : ''}。`;
+    else this.lead.textContent = `共 ${this.items.length} 道题${filtered ? `，符合条件的 ${items.length} 道` : ''}。出好的题会自动收进来；点一道题查看或修改，勾选几道可以组成试卷，也可以建文件夹分类整理。`;
     this.list.innerHTML = '';
     if (!this.items.length) {
       const empty = el('li', 'bank-empty');
       empty.append(el('p', '', '题库还是空的。出好的题会自动收进这里。'), button('去出题', 'btn primary', () => this.shell.setMode('idle')));
       this.list.append(empty);
-    } else if (!items.length) {
+    } else if (!items.length && inView) {
       this.list.append(el('li', 'bank-empty', '没有符合条件的题，换个关键词或筛选条件试试。'));
+    } else if (!items.length) {
+      this.list.append(el('li', 'bank-empty', folder
+        ? (nested ? '这个文件夹里的题都在子文件夹里，点上面的子文件夹看。' : '这个文件夹还是空的：回到全部题目，把题拖到这个文件夹上，或者勾选后点"移到文件夹"。')
+        : '题都放进文件夹了。'));
     }
     // 按知识点排：同一个考点的题放在一起，考点按教材目录的先后，组里新出的在前
     let ordered = items.map((item) => ({ item, group: null }));
@@ -383,13 +801,32 @@ export class Library {
       if (item.solution_issue) meta.append(el('span', 'edited flagged', '待核对'));
       if (item.imported) meta.append(el('span', 'edited', '导入'));
       if (item.edited) meta.append(el('span', 'edited', '改过'));
+      // 看全部题目时标出这道题在哪个文件夹
+      const home = this.folder === 'all' && item.folder_id ? this.folderById(item.folder_id) : null;
+      if (home) {
+        const tag = el('span', 'folder-tag');
+        tag.insertAdjacentHTML('afterbegin', svg('folder'));
+        tag.append(home.name);
+        tag.title = this.folderPath(home.id).map((folder) => folder.name).join(' › ');
+        meta.append(tag);
+      }
       meta.append(el('span', 'when', formatWhen(item.created_at)));
       open.append(meta, mathText('span', 'bank-stem', clipStem(item.stem)));
       open.addEventListener('click', () => this.select(item.id));
+      // 拖到文件夹上就移进去：勾选了几道、拖的是其中一道时，几道一起移
+      row.draggable = true;
+      row.addEventListener('dragstart', (event) => {
+        const ids = this.picked.has(item.id) ? [...this.picked] : [item.id];
+        event.dataTransfer.setData(DRAG_ITEMS, JSON.stringify(ids));
+        event.dataTransfer.effectAllowed = 'move';
+        row.classList.add('dragging');
+      });
+      row.addEventListener('dragend', () => row.classList.remove('dragging'));
       row.append(pick, open);
       this.list.append(row);
     }
     renderMath(this.list);
+    this.renderFolders();
     this.renderBar();
     this.renderTree();
   }
@@ -416,8 +853,10 @@ export class Library {
     this.bar.append(el('span', 'pick-count', `已选 ${count} 道`));
     const paper = this.shell.openPaper();
     if (paper) this.bar.append(button(`加入《${paper.title}》`, 'btn primary', () => this.compose(true)));
+    const move = button('移到文件夹', 'btn', () => this.moveMenu(move, [...this.picked]));
     this.bar.append(
       button('用选中的题组卷', paper ? 'btn' : 'btn primary', () => this.compose(false)),
+      move,
       button('精简解析', 'btn', () => this.tidyMany([...this.picked])),
       button('删除', 'btn', () => { this.confirmingBulk = true; this.renderBar(); }),
       button('取消选择', 'link-btn', () => { this.picked.clear(); this.renderList(); }),
@@ -484,12 +923,15 @@ export class Library {
       : [
         button(item.full_solution_steps.length ? '重新精简解析' : '精简解析', 'ghost-btn', (event) => this.tidy(item, event.currentTarget)),
         button(item.figure_svg ? '改配图' : '配图', 'ghost-btn', () => { this.figuring = !this.figuring; this.renderPanel(); }),
+        button('移到', 'ghost-btn', (event) => this.moveMenu(event.currentTarget, [item.id])),
         button('修改', 'ghost-btn', () => { this.editing = true; this.renderPanel(); }),
         button('删除', 'ghost-btn', () => { this.confirming = true; this.renderPanel(); }),
       ];
+    const home = item.folder_id ? this.folderById(item.folder_id) : null;
+    const when = item.edited ? `改于 ${formatWhen(item.updated_at)}` : `收进题库 ${formatWhen(item.created_at)}`;
     panel.header({
       heading: '题目',
-      note: item.edited ? `改于 ${formatWhen(item.updated_at)}` : `收进题库 ${formatWhen(item.created_at)}`,
+      note: home ? `${when} · 在「${home.name}」` : when,
       actions,
     });
     panel.body.innerHTML = '';
@@ -678,6 +1120,8 @@ export class Library {
   async removeMany(ids) {
     try {
       const data = await request('/api/bank/delete', { method: 'POST', body: JSON.stringify({ ids }) });
+      // 文件夹里的题数跟着变
+      this.folders = (await request('/api/bank/folders').catch(() => null))?.folders || this.folders;
       const gone = new Set(ids);
       const order = this.visible().map((item) => item.id);
       const index = order.indexOf(this.current);

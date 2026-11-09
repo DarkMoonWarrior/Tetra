@@ -3,6 +3,9 @@
 出好的题自动收进题库（第一次启动时，也会把以前出过的题补进来）。题库里存的是一份可以编辑的题目，
 和出题记录分开：在题库里修改、删除，不会动原来的出题记录。
 试卷只记题库里题目的编号和分值，所以题库里改了题，试卷也跟着变；题从题库删掉后，试卷里会跳过它。
+
+文件夹：老师自己建的分类，可以一层套一层。一道题最多放在一个文件夹里（bank_items.folder_id，空 = 未归类）。
+删文件夹不删题：里面的题和子文件夹挪到它的上一级。同一层里文件夹不重名，助手按名字找文件夹时不会对错。
 """
 
 from __future__ import annotations
@@ -23,6 +26,24 @@ from mingti.question_authoring.schemas import QuestionType
 logger = logging.getLogger("mingti.bank")
 
 TYPE_ORDER = ("single_choice", "multiple_choice", "fill_blank", "open_response")
+FOLDER_NAME_MAX = 30
+FOLDER_DEPTH_MAX = 5  # 文件夹最多套几层
+
+
+class FolderError(ValueError):
+    """文件夹操作不成立（重名、找不到、挪进自己里面……）：消息直接显示给用户。"""
+
+
+def folder_name(raw: object) -> str:
+    """文件夹名：去掉首尾空白，中间的连续空白并成一个；不能是空的，最多 FOLDER_NAME_MAX 个字。"""
+    name = " ".join(str(raw or "").split())
+    if not name:
+        raise FolderError("文件夹名不能是空的")
+    return name[:FOLDER_NAME_MAX]
+
+
+def _same_name(a: str, b: str) -> bool:
+    return " ".join(a.split()).casefold() == " ".join(b.split()).casefold()
 
 
 def _now() -> str:
@@ -155,8 +176,20 @@ class BankStore:
                     data_json text not null
                 );
                 create table if not exists meta (key text primary key, value text);
+                create table if not exists bank_folders (
+                    id text primary key,
+                    name text not null,
+                    parent_id text,
+                    created_at text not null,
+                    updated_at text not null
+                );
                 """
             )
+            # 旧的题库没有"所在文件夹"这一列：补上（旧题都是未归类）
+            columns = {row[1] for row in db.execute("pragma table_info(bank_items)")}
+            if "folder_id" not in columns:
+                db.execute("alter table bank_items add column folder_id text")
+            db.execute("create index if not exists bank_items_folder on bank_items (folder_id)")
         if backfill_from is not None:
             self._backfill(backfill_from)
 
@@ -210,6 +243,7 @@ class BankStore:
             "updated_at": row["updated_at"],
             "edited": bool(row["edited"]),
             "imported": str(row["source_id"] or "").startswith("import:"),
+            "folder_id": row["folder_id"],
             **BankQuestion.model_validate_json(row["data_json"]).model_dump(),
         }
 
@@ -221,8 +255,8 @@ class BankStore:
             row = db.execute("select * from bank_items where source_id = ?", (record.get("id"),)).fetchone()
         return None if row is None else self._item(row)
 
-    def add_imported(self, item: dict, *, source_id: str) -> str | None:
-        """导入（从 PDF、图片识别出来）的题收进题库；同一个来源编号不重复收。"""
+    def add_imported(self, item: dict, *, source_id: str, folder_id: str | None = None) -> str | None:
+        """导入（从 PDF、图片识别出来）的题收进题库；同一个来源编号不重复收。folder_id：直接放进这个文件夹。"""
         # 从原卷上截下来的配图；太大放不下就不要了，题目照收
         figure_svg = str(item.get("figure_svg") or "")
         if len(figure_svg) > 300000:
@@ -245,14 +279,16 @@ class BankStore:
         item_id = f"b_{uuid.uuid4().hex[:10]}"
         now = _now()
         with self._lock, self._connect() as db:
+            if folder_id and not db.execute("select 1 from bank_folders where id = ?", (folder_id,)).fetchone():
+                folder_id = None  # 文件夹刚被删掉：照收，放在未归类
             cursor = db.execute(
                 """
                 insert or ignore into bank_items
-                (id, source_id, created_at, updated_at, edited, question_type, difficulty, knowledge, data_json)
-                values (?, ?, ?, ?, 0, ?, ?, ?, ?)
+                (id, source_id, created_at, updated_at, edited, question_type, difficulty, knowledge, data_json, folder_id)
+                values (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
                 """,
                 (item_id, source_id, now, now, question.question_type, question.difficulty, question.knowledge,
-                 question.model_dump_json()),
+                 question.model_dump_json(), folder_id or None),
             )
         return item_id if cursor.rowcount else None
 
@@ -305,6 +341,213 @@ class BankStore:
             bank = db.execute("select count(*) from bank_items").fetchone()[0]
             papers = db.execute("select count(*) from papers").fetchone()[0]
         return {"bank": bank, "papers": papers}
+
+    # ---------- 文件夹 ----------
+
+    @staticmethod
+    def _tree(db: sqlite3.Connection) -> dict[str, dict]:
+        return {row["id"]: dict(row) for row in db.execute("select * from bank_folders order by created_at, rowid")}
+
+    @staticmethod
+    def _depth(tree: dict[str, dict], folder_id: str | None) -> int:
+        """这个文件夹在第几层（最外层是 1；None 表示最外面，是 0）。"""
+        depth, node, seen = 0, folder_id, set()
+        while node in tree and node not in seen:
+            seen.add(node)
+            depth += 1
+            node = tree[node]["parent_id"]
+        return depth
+
+    @staticmethod
+    def _height(tree: dict[str, dict], folder_id: str) -> int:
+        """这个文件夹连同下面的子文件夹一共几层（没有子文件夹是 1）。"""
+        kids = [folder["id"] for folder in tree.values() if folder["parent_id"] == folder_id]
+        return 1 + max((BankStore._height(tree, kid) for kid in kids), default=0)
+
+    @staticmethod
+    def _sibling_named(tree: dict[str, dict], parent_id: str | None, name: str, skip: str | None = None) -> dict | None:
+        return next(
+            (f for f in tree.values() if f["parent_id"] == parent_id and f["id"] != skip and _same_name(f["name"], name)),
+            None,
+        )
+
+    def folders(self) -> list[dict]:
+        """全部文件夹，按建立的先后：{id, name, parent_id, created_at, count（直接装着几道题）, total（连同子文件夹里的）}。"""
+        with self._connect() as db:
+            tree = self._tree(db)
+            counts = dict(db.execute(
+                "select folder_id, count(*) from bank_items where folder_id is not null group by folder_id"
+            ).fetchall())
+        children: dict[str | None, list[str]] = {}
+        for folder in tree.values():
+            parent = folder["parent_id"] if folder["parent_id"] in tree else None
+            children.setdefault(parent, []).append(folder["id"])
+        totals: dict[str, int] = {}
+
+        def total(folder_id: str, seen: frozenset = frozenset()) -> int:
+            if folder_id not in totals:
+                kids = [kid for kid in children.get(folder_id, []) if kid not in seen]
+                totals[folder_id] = counts.get(folder_id, 0) + sum(total(kid, seen | {folder_id}) for kid in kids)
+            return totals[folder_id]
+
+        return [
+            {
+                "id": folder["id"],
+                "name": folder["name"],
+                "parent_id": folder["parent_id"] if folder["parent_id"] in tree else None,
+                "created_at": folder["created_at"],
+                "count": counts.get(folder["id"], 0),
+                "total": total(folder["id"]),
+            }
+            for folder in tree.values()
+        ]
+
+    def folder(self, folder_id: str) -> dict | None:
+        return next((folder for folder in self.folders() if folder["id"] == folder_id), None)
+
+    def create_folder(self, name: str, parent_id: str | None = None, *, reuse: bool = False) -> dict:
+        """新建文件夹。同一层已经有同名的：reuse 为真就直接用那个（返回值带 existed），否则报错。"""
+        name = folder_name(name)
+        with self._lock, self._connect() as db:
+            tree = self._tree(db)
+            if parent_id is not None and parent_id not in tree:
+                raise FolderError("上级文件夹不存在（可能刚被删掉了）")
+            same = self._sibling_named(tree, parent_id, name)
+            if same is not None:
+                if reuse:
+                    return {**same, "existed": True}
+                raise FolderError(f"这里已经有叫「{same['name']}」的文件夹了")
+            if self._depth(tree, parent_id) >= FOLDER_DEPTH_MAX:
+                raise FolderError(f"文件夹最多套 {FOLDER_DEPTH_MAX} 层")
+            folder_id = f"f_{uuid.uuid4().hex[:8]}"
+            now = _now()
+            db.execute(
+                "insert into bank_folders (id, name, parent_id, created_at, updated_at) values (?, ?, ?, ?, ?)",
+                (folder_id, name, parent_id, now, now),
+            )
+        return {"id": folder_id, "name": name, "parent_id": parent_id, "created_at": now, "updated_at": now}
+
+    def rename_folder(self, folder_id: str, name: str) -> tuple[dict, str]:
+        """改名；返回（改好的文件夹，原来的名字）。"""
+        name = folder_name(name)
+        with self._lock, self._connect() as db:
+            tree = self._tree(db)
+            folder = tree.get(folder_id)
+            if folder is None:
+                raise FolderError("文件夹不存在（可能已经删掉了）")
+            same = self._sibling_named(tree, folder["parent_id"], name, skip=folder_id)
+            if same is not None:
+                raise FolderError(f"这里已经有叫「{same['name']}」的文件夹了")
+            db.execute("update bank_folders set name = ?, updated_at = ? where id = ?", (name, _now(), folder_id))
+        return {**folder, "name": name}, folder["name"]
+
+    def move_folder(self, folder_id: str, parent_id: str | None) -> str | None:
+        """把文件夹挪到 parent_id 里（None：挪到最外层）；返回原来的上级。"""
+        with self._lock, self._connect() as db:
+            tree = self._tree(db)
+            folder = tree.get(folder_id)
+            if folder is None:
+                raise FolderError("文件夹不存在（可能已经删掉了）")
+            if parent_id is not None:
+                if parent_id not in tree:
+                    raise FolderError("要挪进去的文件夹不存在（可能刚被删掉了）")
+                node, seen = parent_id, set()
+                while node in tree and node not in seen:
+                    if node == folder_id:
+                        raise FolderError("不能把文件夹挪进它自己或者它的子文件夹里")
+                    seen.add(node)
+                    node = tree[node]["parent_id"]
+                if self._depth(tree, parent_id) + self._height(tree, folder_id) > FOLDER_DEPTH_MAX:
+                    raise FolderError(f"挪过去会超过 {FOLDER_DEPTH_MAX} 层：文件夹最多套 {FOLDER_DEPTH_MAX} 层")
+            same = self._sibling_named(tree, parent_id, folder["name"], skip=folder_id)
+            if same is not None:
+                raise FolderError(f"那里已经有叫「{same['name']}」的文件夹了")
+            db.execute("update bank_folders set parent_id = ?, updated_at = ? where id = ?", (parent_id, _now(), folder_id))
+        return folder["parent_id"]
+
+    def delete_folder(self, folder_id: str) -> dict:
+        """删掉文件夹：里面的题和子文件夹挪到它的上一级（子文件夹和那里的重名就在名字后面加"（2）"）。
+        返回撤销要用的信息 {folder, items, children, renamed}。"""
+        with self._lock, self._connect() as db:
+            tree = self._tree(db)
+            folder = tree.get(folder_id)
+            if folder is None:
+                raise FolderError("文件夹不存在（可能已经删掉了）")
+            parent = folder["parent_id"] if folder["parent_id"] in tree else None
+            items = [row[0] for row in db.execute("select id from bank_items where folder_id = ?", (folder_id,))]
+            children = [f for f in tree.values() if f["parent_id"] == folder_id]
+            siblings = [f["name"] for f in tree.values() if f["parent_id"] == parent and f["id"] != folder_id]
+            renamed: dict[str, str] = {}
+            now = _now()
+            for child in children:
+                name, n = child["name"], 2
+                while any(_same_name(other, name) for other in siblings):
+                    name = f"{child['name'][:FOLDER_NAME_MAX - 4]}（{n}）"
+                    n += 1
+                if name != child["name"]:
+                    renamed[child["id"]] = child["name"]
+                siblings.append(name)
+                db.execute(
+                    "update bank_folders set parent_id = ?, name = ?, updated_at = ? where id = ?",
+                    (parent, name, now, child["id"]),
+                )
+            db.execute("update bank_items set folder_id = ? where folder_id = ?", (parent, folder_id))
+            db.execute("delete from bank_folders where id = ?", (folder_id,))
+        return {"folder": folder, "items": items, "children": [child["id"] for child in children], "renamed": renamed}
+
+    def restore_folder(self, info: dict) -> None:
+        """撤销删除：按 delete_folder 返回的信息把文件夹建回来，原来的题和子文件夹放回去。"""
+        folder = info["folder"]
+        with self._lock, self._connect() as db:
+            tree = self._tree(db)
+            parent = folder.get("parent_id") if folder.get("parent_id") in tree else None
+            if folder["id"] not in tree:
+                name = folder["name"]
+                if self._sibling_named(tree, parent, name) is not None:
+                    name = f"{name[:FOLDER_NAME_MAX - 4]}（恢复）"
+                db.execute(
+                    "insert into bank_folders (id, name, parent_id, created_at, updated_at) values (?, ?, ?, ?, ?)",
+                    (folder["id"], name, parent, folder.get("created_at") or _now(), _now()),
+                )
+            for child_id in info.get("children") or []:
+                if child_id in tree:
+                    old = (info.get("renamed") or {}).get(child_id) or tree[child_id]["name"]
+                    db.execute("update bank_folders set parent_id = ?, name = ? where id = ?", (folder["id"], old, child_id))
+            ids = list(info.get("items") or [])
+            for start in range(0, len(ids), 500):
+                part = ids[start:start + 500]
+                marks = ",".join("?" for _ in part)
+                db.execute(f"update bank_items set folder_id = ? where id in ({marks})", [folder["id"], *part])
+
+    def move_items(self, item_ids: list[str], folder_id: str | None) -> dict[str, str | None]:
+        """把这些题放进文件夹（None：移出文件夹，变成未归类）；返回真的挪动了的题原来在哪个文件夹 {题号: 原文件夹}。"""
+        item_ids = list(dict.fromkeys(item_ids))
+        if not item_ids:
+            return {}
+        previous: dict[str, str | None] = {}
+        with self._lock, self._connect() as db:
+            if folder_id is not None and not db.execute("select 1 from bank_folders where id = ?", (folder_id,)).fetchone():
+                raise FolderError("文件夹不存在（可能刚被删掉了）")
+            for start in range(0, len(item_ids), 500):
+                part = item_ids[start:start + 500]
+                marks = ",".join("?" for _ in part)
+                rows = db.execute(f"select id, folder_id from bank_items where id in ({marks})", part).fetchall()
+                moving = [row["id"] for row in rows if row["folder_id"] != folder_id]
+                previous.update({row["id"]: row["folder_id"] for row in rows if row["folder_id"] != folder_id})
+                if moving:
+                    marks = ",".join("?" for _ in moving)
+                    db.execute(f"update bank_items set folder_id = ? where id in ({marks})", [folder_id, *moving])
+        return previous
+
+    def put_back(self, places: dict[str, str | None]) -> None:
+        """撤销挪动：每道题放回原来的文件夹（那个文件夹已经不在了就放到未归类）。"""
+        with self._lock, self._connect() as db:
+            alive = set(self._tree(db))
+            for item_id, folder_id in places.items():
+                db.execute(
+                    "update bank_items set folder_id = ? where id = ?",
+                    (folder_id if folder_id in alive else None, item_id),
+                )
 
     # ---------- 试卷 ----------
 

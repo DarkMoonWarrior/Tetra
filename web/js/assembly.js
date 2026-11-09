@@ -18,6 +18,12 @@ const STATE = {
   failed: ['failed', '没出成'],
 };
 const STAGES = [['planning', '定组卷方案'], ['selecting', '从题库挑题'], ['generating', '现场出题'], ['assembling', '组成试卷']];
+// 题目从哪来（方案里的 source）
+const SOURCE_NOTE = {
+  original: '题目全部现场出新题，不用题库里的题',
+  bank_first: '先从题库里挑合适的题，不够的现场出',
+  bank_only: '只用题库里的题，不现场出',
+};
 const oneLine = (text) => String(text || '').replace(/\$\$/g, '$').replace(/\s*\n+\s*/g, ' ');
 const scoreText = (value) => (Number.isInteger(Number(value)) ? String(Number(value)) : String(Number(Number(value).toFixed(1))));
 
@@ -154,7 +160,7 @@ export class PaperTurn {
     this.planKey = key;
     this.plan.replaceChildren();
     if (!plan) {
-      this.plan.append(el('p', 'run-note', '先按你的要求定组卷方案：考查范围、题型结构，以及每道题考什么知识点、多难、几分；然后从题库里挑题，题库里没有合适的再现场出题。'));
+      this.plan.append(el('p', 'run-note', '先按你的要求定组卷方案：考查范围、题型结构，以及每道题考什么知识点、多难、几分；再按你的说法准备题目：要原创就全部现场出新题，否则先从题库里挑，题库里没有合适的再现场出。'));
       return;
     }
     const count = this.slots().length;
@@ -162,13 +168,16 @@ export class PaperTurn {
     const scope = String(plan.scope || '').replace(/[。．.；;，,\s]+$/, '');
     const facts = [scope, `${count} 道题，满分 ${scoreText(plan.total)} 分`, plan.minutes ? `考试时间 ${plan.minutes} 分钟` : ''];
     this.plan.append(el('p', 'plan-facts', `${facts.filter(Boolean).join('；')}。`));
+    if (SOURCE_NOTE[plan.source]) this.plan.append(el('p', 'plan-facts', `${SOURCE_NOTE[plan.source]}。`));
     if (plan.summary) this.plan.append(el('p', 'plan-summary', plan.summary));
   }
 
-  // 四步：定方案、挑题、现场出题、组成试卷。题库里的题够用时，现场出题这一步写"不用现场出题"
+  // 四步：定方案、挑题、现场出题、组成试卷。题库里的题够用时，现场出题这一步写"不用现场出题"；
+  // 全部原创时挑题这一步写"不用题库"，只用题库时现场出题这一步写"不现场出题"
   renderSteps(snap) {
     const generated = this.slots().some((slot) => slot.source === 'generated' || ['queued', 'generating', 'failed'].includes(slot.state));
-    const key = `${snap.stage}|${snap.status}|${generated}|${Boolean(snap.plan)}|${Boolean(snap.paper)}`;
+    const source = snap.plan?.source || 'bank_first';
+    const key = `${snap.stage}|${snap.status}|${generated}|${Boolean(snap.plan)}|${Boolean(snap.paper)}|${source}`;
     if (this.stepsKey === key) return;
     this.stepsKey = key;
     let states;
@@ -184,9 +193,12 @@ export class PaperTurn {
     }
     this.steps.replaceChildren();
     STAGES.forEach(([stage, name], i) => {
-      const skipped = stage === 'generating' && states[i] === 'done' && !generated;
+      let label = name;
+      if (stage === 'selecting' && source === 'original' && snap.plan) label = '不用题库';
+      else if (stage === 'generating' && source === 'bank_only' && snap.plan) label = '不现场出题';
+      else if (stage === 'generating' && states[i] === 'done' && !generated) label = '不用现场出题';
       const item = el('li', `paper-step ${states[i]}`);
-      item.append(el('i'), el('span', '', skipped ? '不用现场出题' : name));
+      item.append(el('i'), el('span', '', label));
       this.steps.append(item);
     });
   }
@@ -233,7 +245,9 @@ export class PaperTurn {
       else if (slot.state === 'generating') {
         const who = ROLES[slot.role]?.name;
         text = el('span', 'batch-text', stage ? `${who ? `${who}：` : ''}${stage}…` : '正在开始…');
-      } else if (slot.state === 'queued') text = el('span', 'batch-text', '题库里没有合适的，等着现场出题');
+      } else if (slot.state === 'queued') {
+        text = el('span', 'batch-text', this.snapshot?.plan?.source === 'original' ? '等着现场出题' : '题库里没有合适的，等着现场出题');
+      }
       else text = el('span', 'batch-text', '等挑题');
       open.append(el('span', 'batch-no', String(slot.no)), status, meta, text);
       row.replaceChildren(open);
@@ -258,10 +272,12 @@ export class PaperTurn {
     const actions = el('div', 'followups');
     if (paper) {
       this.outcome.className = 'outcome ok';
-      const from = [`从题库里选了 ${totals.picked || 0} 道`];
+      const from = totals.picked || snap.plan?.source !== 'original' ? [`从题库里选了 ${totals.picked || 0} 道`] : [];
       const flagged = (snap.slots || []).filter((slot) => slot.flagged).length;
       if (totals.generated) from.push(flagged ? `现场出了 ${totals.generated} 道（其中 ${flagged} 道复核还有意见，用之前请核对）` : `现场出了 ${totals.generated} 道（都审核过，已收进题库）`);
-      const lacking = totals.failed ? `；有 ${totals.failed} 道没出成，可以在试卷里从题库补上` : '';
+      const lacking = !totals.failed ? ''
+        : snap.plan?.source === 'bank_only' ? `；有 ${totals.failed} 道题库里没有合适的，可以在试卷里补上`
+          : `；有 ${totals.failed} 道没出成，可以在试卷里从题库补上`;
       this.outcome.append(
         el('p', '', `${snap.status === 'cancelled' ? '已停下：' : ''}《${paper.title}》，${paper.count} 道题，满分 ${scoreText(paper.total)} 分。`),
         el('p', '', `${from.join('，')}${lacking}。右侧是整份试卷的预览，答案和解析另起一份附在后面，可以直接导出。`),
@@ -274,6 +290,12 @@ export class PaperTurn {
         button('看整份试卷', 'followup', () => this.actions.showPaper(this)),
         button('在试卷里调整', 'followup', () => this.actions.openPaper(this)),
       );
+      // 用了题库里的题、其实想要全新的：同样的要求再组一次，题目全部现场出
+      if (totals.picked) {
+        const fresh = button('全部换成新题', 'followup', () => this.actions.again(this, 'original'));
+        fresh.title = '按同样的要求再组一份，题目全部现场出新题，不用题库里的题';
+        actions.append(fresh);
+      }
     } else {
       this.outcome.className = snap.status === 'cancelled' ? 'outcome' : 'outcome bad';
       this.outcome.append(el('p', '', legacyText(snap.error) || '没能组成试卷。'));

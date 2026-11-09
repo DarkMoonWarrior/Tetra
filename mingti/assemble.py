@@ -2,10 +2,13 @@
 
 1. 定组卷方案（命题双向细目表）：请模型按要求、今天的日期（第几学期）和教材目录，定考查范围、题型结构，
    以及每道题考哪个知识点、多难、几分。没指定结构时照新高考数学卷：单选 8、多选 3、填空 3、解答 5，满分 150。
+   同时定题目从哪来（source）：老师要原创、新题（"全部原创""出一套……卷"）就全部现场出（original）；
+   说组卷、挑题就先用题库（bank_first）；说只用题库里的题就不现场出（bank_only）。界面也可以直接指定（"全部换成新题"）。
 2. 按方案从题库里挑题：题型相同、难度最多差一档，知识点先找同一个考点，再放宽到同一节、同一章；
-   同一个考点在一份卷子里不重复。题干说"如图"却没有图、没有答案的题不用。
+   同一个考点在一份卷子里不重复。题干说"如图"却没有图、没有答案的题不用。original 跳过这一步。
 3. 题库里没有合适的，就现场出题：走完整的出题流程（命题、审题、解题、复核），出好的题照常收进题库。
-   一道没出成，降一档难度再出一次；还不成，就放宽条件从题库里找一道同题型的顶上。
+   一道没出成，降一档难度再出一次；还不成，就放宽条件从题库里找一道同题型的顶上（original 不用题库的题，再出一次）。
+   bank_only 不现场出：挑不到的放宽条件找，还找不到就空着。
 4. 组成一份试卷（考试、测验用标准试卷版式），存进"试卷"，在对话里可以直接导出 Word、PDF。
 
 组卷在后台线程里跑，界面轮询 snapshot() 看进度；组好（或停下、失败）后整个过程存成对话里的一条记录（store.messages，kind = "paper"）。
@@ -44,19 +47,27 @@ SESSION_ID = re.compile(r"[A-Za-z0-9_-]{4,40}")
 # 题干里说到了图，题库里这道题却没有配图：组进卷子学生没法做，不用
 FIGURE_WORDS = re.compile(r"如图|下图|右图|左图|图中|图示|见图")
 
-PLAN_INSTRUCTIONS = """你是高中数学教研组的命题老师。老师用一句话提了组卷要求（request），请你定一份组卷方案（命题双向细目表）。之后会按方案先从题库里挑题，题库里没有的再现场出题。summary 和 history 是这个对话的前文，老师在前面说过的范围、题量、侧重点也要照顾到。
+PLAN_INSTRUCTIONS = """你是高中数学教研组的命题老师。老师用一句话提了组卷要求（request），请你定一份组卷方案（命题双向细目表）。之后会按方案准备题目：从题库里挑，或者现场出新题。summary 和 history 是这个对话的前文，老师在前面说过的范围、题量、侧重点、题目来源也要照顾到。
+0. 题目来源 source（前文里老师说过的也算）：
+   - original：全部现场出新题，不用题库里的题。老师说了原创、全新、新题、新出、自己出、现编、不要用题库里的题；或者是“出一套……卷”“编一套……”“出 30 道题组成……”这类要你出题的说法，又没提题库。
+   - bank_first：先从题库里挑，题库里没有合适的再现场出。老师说的是“组卷”“组一套”“挑题”“选题”“从题库里挑……”，没说只用题库。
+   - bank_only：只用题库里的题，不现场出。老师说了只用题库里的题、不要现场出、不要新题。
+   拿不准时选 bank_first。source_fixed 不为空时，source 照它写。
 1. 考查范围：按年级、学期和考试类型定。today 是今天的日期，semester 是现在所在的学期（9 月到次年 1 月是第一学期，2 月到 7 月是第二学期）。比如人教 A 版高一第一学期期末考必修第一册，第二学期期末考必修第二册；期中考试只考本学期前半段的内容；高三复习和模拟考试可以考全部内容。老师说了范围的照老师说的。知识点只能从 outline（教材目录）里选，topic 原样照抄目录里的知识点名称。
 2. 题型结构：老师没指定时，期中、期末、月考和模拟考试用新高考数学卷的结构：单选题 8 道（每道 5 分）、多选题 3 道（每道 6 分）、填空题 3 道（每道 5 分）、解答题 5 道（依次 13、15、15、17、17 分），满分 150 分，考试时间 120 分钟。单元测验、周测可以少一些（比如单选 6、多选 2、填空 2、解答 3，100 分左右）。老师指定了题量、题型、分值或时间的，照老师说的定。
 3. 难度：每道题 1～5（1 基础、2 较易、3 中档、4 较难、5 压轴）。期中、期末以基础和中档为主（容易、中档、难大约 6:3:1）；单元测验更容易一些；高考模拟按高考的难度。同一种题型内由易到难排：单选、多选、填空前几道 1～2，后几道 3～4；解答题前两道 2～3，最后两道 4～5。
 4. 知识点：尽量覆盖范围内的每一章，重点章（比如函数、三角函数、导数）多出几道；同一个知识点在整份卷子里只出现一次。解答题选适合出成大题的知识点。
-5. 题库（bank）里已经有的题：在满足上面要求的前提下，优先选题库里已经有对应题型、难度的知识点，这样能直接用现成的题，少现场出题。
+5. 题库（bank）里已经有的题：source 为 bank_first 或 bank_only 时，在满足上面要求的前提下，优先选题库里已经有对应题型、难度的知识点，这样能直接用现成的题；source 为 original 时不用管题库，按考查要求选知识点，summary 里也不要说用题库的题。
 6. title：试卷名，比如“2026—2027学年第一学期高一期末考试”；exam_name：印在试卷最上面的考试名称（不要写“数学”两个字），一般和 title 一样；tag：右上角的小标记，比如“高一期末”，可以留空；style：考试、测验用 standard（标准试卷版式），练习、作业用 practice；purpose：用途，比如“期末考试”；grade：高一、高二或高三；minutes：考试时间（分钟）；scope：一句话写考查范围；summary：一两句话说明命题思路（范围、结构、难度安排）。
 slots 按卷面顺序列出每一道题：type（single_choice、multiple_choice、fill_blank、open_response）、difficulty、topic、score。最多 30 道。
 只输出 JSON。"""
 
+SOURCES = ("original", "bank_first", "bank_only")
+
 PLAN_SCHEMA = {
     "type": "object",
     "properties": {
+        "source": {"type": "string", "enum": list(SOURCES)},
         "title": {"type": "string"},
         "exam_name": {"type": "string"},
         "tag": {"type": "string"},
@@ -80,7 +91,7 @@ PLAN_SCHEMA = {
             },
         },
     },
-    "required": ["title", "exam_name", "style", "purpose", "grade", "minutes", "scope", "summary", "slots"],
+    "required": ["source", "title", "exam_name", "style", "purpose", "grade", "minutes", "scope", "summary", "slots"],
 }
 
 
@@ -302,10 +313,14 @@ class AssemblyManager:
             outline = Outline(self.outline_for(edition))
             items = [item for item in self.bank.items() if usable(item)]
             self._plan(assembly, outline, items, profile, edition)
-            self._set_stage(assembly, "selecting")
-            self._select(assembly, outline, items)
+            source = (assembly.plan or {}).get("source") or "bank_first"
+            if source != "original":  # 全部原创：不从题库挑
+                self._set_stage(assembly, "selecting")
+                self._select(assembly, outline, items)
             missing = [slot for slot in assembly.slots if not slot.get("bank_id")]
-            if missing and not assembly.stop_requested:
+            if missing and source == "bank_only":
+                self._fill_from_bank(assembly, missing, items)
+            elif missing and not assembly.stop_requested:
                 self._set_stage(assembly, "generating")
                 self._generate_all(assembly, missing, outline, items)
             self._set_stage(assembly, "assembling")
@@ -363,6 +378,8 @@ class AssemblyManager:
             "history": past["lines"],
             "outline": outline.text(),
             "bank": bank_view[:300],
+            # 界面上指定了题目从哪来（比如点了"全部换成新题"）：照它定，不再按说法判断
+            "source_fixed": assembly.meta.get("source") if assembly.meta.get("source") in SOURCES else None,
         }
 
         def listen(event: str, call: dict, updates: dict) -> None:
@@ -442,8 +459,11 @@ class AssemblyManager:
             minutes = 120
         now = datetime.now()
         title = str(plan.get("title") or "").strip()[:60] or f"自动组卷（{now.month} 月 {now.day} 日）"
+        fixed = assembly.meta.get("source")
+        source = fixed if fixed in SOURCES else plan.get("source") if plan.get("source") in SOURCES else "bank_first"
         with assembly.lock:
             assembly.plan = {
+                "source": source,
                 "title": title,
                 "exam_name": str(plan.get("exam_name") or title).strip()[:60],
                 "tag": str(plan.get("tag") or "").strip()[:30],
@@ -549,12 +569,27 @@ class AssemblyManager:
             additional_constraints="\n".join(notes)[:1800],
         )
 
+    def _fill_from_bank(self, assembly: Assembly, missing: list[dict], items: list[dict]) -> None:
+        """只用题库里的题：按方案没挑到的，放宽条件（同题型、同一册）再找一道；还没有就空着，说明原因。"""
+        for slot in missing:
+            with assembly.lock:
+                used = assembly.used_ids | {other["bank_id"] for other in assembly.slots if other.get("bank_id")}
+            spare = self._spare(slot, items, used)
+            with assembly.lock:
+                if spare is not None:
+                    slot.update(state="picked", source="bank", bank_id=spare["id"], stem=spare["stem"][:600],
+                                match="spare", difficulty=int(spare["difficulty"]), error=None)
+                else:
+                    slot.update(state="failed", error="题库里没有合适的题（这次只用题库里的题，不现场出）")
+
     def _generate(self, assembly: Assembly, slot: dict, items: list[dict]) -> None:
         error = ""
-        for attempt in range(2):
+        original = (assembly.plan or {}).get("source") == "original"
+        # 全部原创时不能拿题库里的题顶，多给一次机会
+        for attempt in range(3 if original else 2):
             if assembly.stop_requested:
                 break
-            # 第一次没出成：降一档难度再出一次（难题最容易在审核里一轮轮返工）
+            # 第一次没出成：降一档难度再出（难题最容易在审核里一轮轮返工）
             difficulty = slot["difficulty"] if attempt == 0 else max(1, slot["difficulty"] - 1)
             meta = {
                 **{key: assembly.meta.get(key) for key in ("detail", "edition") if assembly.meta.get(key)},
@@ -587,11 +622,11 @@ class AssemblyManager:
                         )
                     return
             error = job.error or "没能得到通过全部检查的题"
-        # 现场也没出成：放宽条件，从题库里找一道同题型、同一册的题顶上
+        # 现场也没出成：放宽条件，从题库里找一道同题型、同一册的题顶上（全部原创时不顶）
         with assembly.lock:
             stopped = assembly.stop_requested
             used = assembly.used_ids | {other["bank_id"] for other in assembly.slots if other.get("bank_id")}
-        if not stopped:
+        if not stopped and not original:
             spare = self._spare(slot, items, used)
             if spare is not None:
                 with assembly.lock:

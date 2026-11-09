@@ -7,6 +7,8 @@
 - 出题：把这句话里说到的题型、难度、数量、知识点等提取出来，交给界面填到输入框下方的选项里；
   再把这句话连同前文里相关的要求写成一段完整的出题要求（命题员看不到前面的对话），走出题流程。
 - 组卷：交给自动组卷（assemble.py）。
+- 存题：把附件里的题，或者前文里讨论过、解过的题存进题库：交给导入（importer.py），先给用户核对。
+- 整理题库：建文件夹、把题分进文件夹（organize.py），当场做完，可以撤销。
 
 前文（上下文）由 context.py 按 Token 预算整理：最近几轮原文 + 更早内容的摘要；太长时先自动压缩。
 聊天记录存进对话（store.messages）。
@@ -21,7 +23,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from mingti import context
+from mingti import context, organize
 from mingti.deepseek import DeepSeekClientError
 from mingti.question_authoring import PROMPT_REVISION, DeepSeekQuestionAuthoringProvider
 from mingti.tracking import JobRecorder
@@ -41,7 +43,9 @@ ROUTE_INSTRUCTIONS = """你是 Tetra，一个帮高中数学老师出题、组�
 先判断用户这条消息（message）想让你做什么，填 intent：
 - generate：要你现在出新题，比如“出一道……题”“来 3 道……”“编一道……”“再来一道”；也包括要你把刚出的题改一改再出（“难一点”“换个情境”“改成填空题”）。
 - paper：要你组一套试卷、测验卷、练习卷，比如“帮我组一套高一期末试卷”“从题库里挑题组一份单元测验”“出一套模拟卷”。
-- import：用户附上了图片或文件（attachments 不为空），要你把里面的题目存进题库，比如“把这些题存进题库”“录到题库里”“导入题库”“帮我收藏这几道题”。attachments 为空时不能选 import。
+- import：要你把题目存进题库，比如“把这些题存进题库”“录到题库里”“导入题库”“帮我收藏这几道题”“把这个题整理到题库中”“把刚才那道题加进题库”。要存的题可以在这条消息的附件（attachments）里，也可以是前文里的题：用户之前发过的图片、文件或文字里的题，或者你在前文里解过、讲过的题（这条消息没有附件也选 import，系统会从前文里把题和解答整理出来）。
+  前文里由出题流程出好的题（history 里写着“出了一道……”“出了一批题”）已经自动收进题库了：用户要存的只是这种题时选 chat，告诉他已经在题库里了。这条消息没有附件、前文里也找不到要存的题时选 chat，请用户把题发过来。
+- organize：要你整理题库，比如“新建一个叫期中复习的文件夹”“把导数的题都放进导数专题文件夹”“按章节帮我把题库分好”“把刚才出的几道题放进周测文件夹”“把这个文件夹改名为……”“删掉某某文件夹”。只问题库里有什么、有哪些文件夹，选 chat。
 - chat：其余所有情况：打招呼、闲聊、问数学知识、请你讲解或解一道题、问教学建议、问这个应用怎么用、问题库里有什么等。只是讨论出题（比如“怎样出好一道导数题”），没有要你现在出，也算 chat。
   用户附上了图片或文件、要你看里面的内容回答（解题、讲解、检查答案、总结文件……）也是 chat；附上了文件但 message 是空的，当作“识别里面的题并解答”，选 chat，needs_reasoning 填 true。
   附上了一道题、要你照着它出类似的新题（“照这道题出一道类似的”“仿照这道题改编”），选 generate；附件里的题会由系统读出来附在 requirement 后面，requirement 只写用户对新题的要求，不用写怎么看图。
@@ -49,8 +53,10 @@ ROUTE_INSTRUCTIONS = """你是 Tetra，一个帮高中数学老师出题、组�
 拿不准时：touched 为 true（用户刚在输入框下方调过题型、难度等出题选项）而且这句话像是对题目的要求，选 generate；否则选 chat。
 
 reply 写给用户看，用 reply_language 指定的语言（中文或 English）：
-- chat：write_reply 为 true 时直接回答，自然、简洁、友好，不要客套话；数学公式用 LaTeX，行内写在 $…$ 里，单独一行的写在 $$…$$ 里；需要时可以用 Markdown 的列表和加粗；打招呼时简单回应，再用一两句话说说你能做什么（按要求出题并逐道审核、从题库自动组卷、解答数学问题）；问题库、试卷的情况时参考 bank。write_reply 为 false 时 reply 留空字符串（会另外请模型回答）。
-- generate、paper、import：一句话说明接下来要做什么，比如“好的，出 3 道椭圆离心率的单选题。”“好的，先识别里面的题目，核对后再存进题库。”
+- chat：write_reply 为 true 时直接回答，自然、简洁、友好，不要客套话；数学公式用 LaTeX，行内写在 $…$ 里，单独一行的写在 $$…$$ 里；需要时可以用 Markdown 的列表和加粗；打招呼时简单回应，再用一两句话说说你能做什么（按要求出题并逐道审核、从题库自动组卷、解答数学问题、把题存进题库并分文件夹整理）；问题库、试卷、文件夹的情况时参考 bank。不要说你不能写入题库或整理题库：这些你都能做，用户直接说就行。write_reply 为 false 时 reply 留空字符串（会另外请模型回答）。
+- generate、paper、import、organize：一句话说明接下来要做什么，比如“好的，出 3 道椭圆离心率的单选题。”“好的，先识别里面的题目，核对后再存进题库。”“好的，把前面那道题整理好，核对后存进题库。”“好的，帮你把题分进文件夹。”
+
+folder：intent 为 import 且用户说了存到哪个文件夹（比如“存到双曲线文件夹里”）时写文件夹名，其余情况填 null。
 
 needs_reasoning：intent 为 chat 且用户要你解一道具体的数学题、证明、计算或判断对错时填 true（这时 reply 留空字符串），其余填 false。
 
@@ -67,9 +73,10 @@ generate：只在 intent 为 generate 时填，其余情况填 null。只提取�
 ROUTE_SCHEMA = {
     "type": "object",
     "properties": {
-        "intent": {"type": "string", "enum": ["chat", "generate", "paper", "import"]},
+        "intent": {"type": "string", "enum": ["chat", "generate", "paper", "import", "organize"]},
         "reply": {"type": "string"},
         "needs_reasoning": {"type": "boolean"},
+        "folder": {"type": ["string", "null"]},
         "generate": {
             "type": ["object", "null"],
             "properties": {
@@ -89,7 +96,8 @@ ROUTE_SCHEMA = {
 REPLY_INSTRUCTIONS = """你是 Tetra，一个高中数学老师的智能助手。请回答用户这条消息（message）；summary 和 history 是这个对话的前文（summary 是更早内容的摘要），bank 是题库的概况。
 - 解题、证明、计算：写出思路和关键步骤，结论要正确；只用高中阶段的知识和方法（不用洛必达法则、泰勒展开、定积分之类超出高中的方法），像老师给学生讲题那样清楚、简洁。
 - 讲知识点、教学建议：条理清楚，结合高考和平时考试的实际，给得出具体的例子。
-- 打招呼、闲聊：简短自然，可以顺带说说你能做什么（按要求出题并逐道审核、从题库自动组卷、解答数学问题）。
+- 打招呼、闲聊：简短自然，可以顺带说说你能做什么（按要求出题并逐道审核、从题库自动组卷、解答数学问题、把题存进题库并分文件夹整理）。
+- 用户问起能不能存题、整理题库时：你能把附件里或对话里的题存进题库（先给用户核对），也能按用户的话建文件夹、把题分进文件夹，告诉他直接说“把这道题存进题库”“把这几道题放进某某文件夹”就行，不要说你做不到。用户没问起时不要主动提这些。
 数学公式用 LaTeX，行内写在 $…$ 里，单独一行的写在 $$…$$ 里；需要时可以用 Markdown 的标题、列表和加粗。用 reply_language 指定的语言回答（中文或 English），不要客套话。
 只输出 JSON：{"reply": "回答的全文"}。"""
 
@@ -160,11 +168,12 @@ def _normalize_generate(raw: object) -> dict:
 
 
 class Assistant:
-    def __init__(self, models, store, model_runs, uploads=None) -> None:
+    def __init__(self, models, store, model_runs, uploads=None, bank=None) -> None:
         self.models = models
         self.store = store
         self.model_runs = model_runs
         self.uploads = uploads  # attachments.Uploads：聊天里的附件
+        self.bank = bank  # bank.BankStore：整理题库（建文件夹、把题分进文件夹）时用
         # 每个对话一把锁：自动压缩、手动压缩、发下一句前的压缩不会同时做两次
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
@@ -279,7 +288,9 @@ class Assistant:
     ) -> dict:
         """判断这句话的意图。聊天：回答好、存进对话，返回 {intent: "chat", message}；
         出题：返回 {intent: "generate", reply, generate}；组卷：返回 {intent: "paper", reply}；
-        把附件里的题存进题库：返回 {intent: "import", reply}（由 /api/chat-imports 去识别、补解析、给用户核对）。
+        把题存进题库：返回 {intent: "import", reply, source, folder}（由 /api/chat-imports 去识别、补解析、给用户核对；
+        source = "attachments" 是这条消息的附件，"conversation" 是前文里的题）；
+        整理题库：当场做完，返回 {intent: "organize", message}（organize.py，存进对话的那条记录）。
         都带上 context（用了多少上下文）；发之前自动压缩过的，再带上 compressed（摘要记录）。
         attachments：附件编号（attachments.Uploads）；language：界面语言，en 时回答用英文。"""
         route = self.models.route(model_id)
@@ -315,13 +326,31 @@ class Assistant:
             route, stage=ROUTE_STAGE, instructions=ROUTE_INSTRUCTIONS, payload=payload, schema=ROUTE_SCHEMA,
             max_tokens=2500, thinking=False, usage=usage,
         )
-        intent = decided.get("intent") if decided.get("intent") in ("chat", "generate", "paper", "import") else "chat"
-        if intent == "import" and not files:
-            intent = "chat"
+        intent = decided.get("intent")
+        intent = intent if intent in ("chat", "generate", "paper", "import", "organize") else "chat"
         reply = str(decided.get("reply") or "").strip()
+        # 没带附件要存题：前文里得有聊过的题（用户发过的图片、文字，或者解过的题）；一句聊天都没有就当聊天回答
+        if intent == "import" and not files and not any(entry.get("kind") == "chat" for entry in entries):
+            intent, reply = "chat", ""
+        if intent == "organize" and self.bank is None:
+            intent, reply = "chat", ""
         extra = {"compressed": compressed}
         if intent == "import":
-            return {"intent": intent, "reply": reply, **extra}
+            folder = str(decided.get("folder") or "").strip()[:30] or None
+            return {"intent": intent, "reply": reply, "source": "attachments" if files else "conversation",
+                    "folder": folder, **extra}
+        if intent == "organize":
+            def call(asked: dict) -> dict:
+                return self._ask(
+                    route, stage=organize.STAGE, instructions=organize.INSTRUCTIONS, payload=asked,
+                    schema=organize.SCHEMA, max_tokens=6000, thinking=CHAT_THINKING.get(thinking, "light"), usage=usage,
+                )
+
+            message = organize.run(
+                call=call, bank=self.bank, store=self.store, text=text, session_id=session_id, past=past,
+                language=language, model=route.id, thinking=thinking, started=started, usage=usage,
+            )
+            return {"intent": intent, "message": message, **extra}
         if intent == "generate":
             settings = _normalize_generate(decided.get("generate"))
             if files:

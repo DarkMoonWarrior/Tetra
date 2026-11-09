@@ -44,6 +44,9 @@ class Settings:
     compat_base_url: str
     compat_api_key: str
     compat_models: tuple[str, ...]
+    # 整个服务同时在出的题最多几道（几个对话各自出题、批量出题、组卷现场出题加在一起）；
+    # 再多的排队等。max_parallel_jobs 管的是一批题、一份试卷里同时出几道
+    max_running_jobs: int = 8
 
 
 def load_settings() -> Settings:
@@ -62,4 +65,5 @@ def load_settings() -> Settings:
         compat_base_url=get("COMPAT_BASE_URL"),
         compat_api_key=get("COMPAT_API_KEY"),
         compat_models=tuple(m.strip() for m in get("COMPAT_MODELS").split(",") if m.strip()),
+        max_running_jobs=max(1, int(get("MAX_RUNNING_JOBS", "8"))),
     )
