@@ -1,7 +1,9 @@
 // 试卷：从题库里挑题组卷，调整顺序和分值，导出 Word 或 PDF。
 // 右栏是试卷预览，和导出的 PDF、打印出来的样子一致（都由后端的打印页生成）。
 
-import { $, DIFFICULTY_LABEL, TYPE_LABEL, el, formatWhen, mathText, renderMath, request, segmented, toast } from './shared.js';
+import {
+  $, DIFFICULTY_LABEL, TYPE_LABEL, el, formatWhen, mathText, renderMath, request, runtime, segmented, toast,
+} from './shared.js';
 import { isDark } from './theme.js';
 
 const TYPE_ORDER = ['single_choice', 'multiple_choice', 'fill_blank', 'open_response'];
@@ -31,7 +33,17 @@ export function defaultScore(type) {
   return DEFAULT_SCORE[type] || 5;
 }
 
-// 导出一份试卷（Word 或 PDF）并下载；trigger 是点的那个按钮，生成期间改成"正在生成…"
+// 桌面版：刚存好的文件，打开它或者在资源管理器里打开所在的文件夹
+async function openSaved(target, path) {
+  try {
+    await request('/api/desktop/open', { method: 'POST', body: JSON.stringify({ target, path }) });
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+// 导出一份试卷（Word 或 PDF）；trigger 是点的那个按钮，生成期间改成"正在生成…"。
+// 网页端：浏览器下载。桌面版：直接存进设置里的文件夹（默认"文档\Tetra"，或者每次弹另存为），存好后可以打开
 export async function downloadPaper(paperId, { format, answers = true, title = '试卷', trigger = null }) {
   const label = trigger?.textContent;
   if (trigger) {
@@ -39,6 +51,15 @@ export async function downloadPaper(paperId, { format, answers = true, title = '
     trigger.textContent = format === 'pdf' ? '正在生成 PDF…' : '正在生成 Word…';
   }
   try {
+    if (runtime.desktop) {
+      const saved = await request(`/api/papers/${paperId}/save`, { method: 'POST', body: JSON.stringify({ format, answers }) });
+      if (saved.cancelled) return;
+      toast(`已保存：${saved.name}`, [
+        { label: '打开', onClick: () => openSaved('file', saved.path) },
+        { label: '打开文件夹', onClick: () => openSaved('folder', saved.path) },
+      ]);
+      return;
+    }
     const response = await fetch(`/api/papers/${paperId}/export?format=${format}&answers=${answers}`);
     if (!response.ok) {
       let detail = '';

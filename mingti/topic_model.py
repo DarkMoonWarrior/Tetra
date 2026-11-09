@@ -24,9 +24,11 @@ from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-MODEL_PATH = ROOT / "data" / "topic_model.json.gz"
-TREE_PATH = ROOT / "data" / "curriculum" / "pep-a-full-knowledge-tree-v1.csv"
+from mingti.config import CURRICULUM_CSV, DATA_DIR
+
+ROOT = DATA_DIR.parent  # 桌面程序里是解包目录（见 config.py），从源码运行时是项目目录
+MODEL_PATH = DATA_DIR / "topic_model.json.gz"
+TREE_PATH: Path = CURRICULUM_CSV
 
 # 教材的章 → 专题。用的是 A 版的章名；B 版沿用 A 版的知识点编号，按知识点编号对照，两版都适用
 CHAPTER_TOPIC = {

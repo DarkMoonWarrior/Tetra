@@ -139,13 +139,21 @@ flowchart LR
 
 ## 快速开始
 
-### 环境要求
+### 桌面版（Windows）
+
+运行 `Tetra-Setup-<版本>.exe` 安装（可以选安装位置、桌面快捷方式和开机自启，在「设置 → 应用」里卸载），或者把 `Tetra-<版本>-windows-x64.zip` 解压到任意文件夹，双击 `Tetra.exe`：不用装 Python，也不用开终端。窗口用 Windows 自带的 Edge 内核打开；程序开着时，用任何浏览器访问 http://127.0.0.1:8765 也是同一个 Tetra。开机自启、快捷方式、导出文件存到哪、数据文件夹放哪，都在「个人设置 → 桌面版」里改。
+
+自己打包：见[开发指南](docs/development.md#打包桌面程序windows)。
+
+### 从源码运行
+
+#### 环境要求
 
 - Python 3.10 及以上（目前在 Windows 11 上开发和测试）
 - 一个模型服务的 API Key；看图解题和识题需要支持图片输入的模型
 - 可选：Microsoft Word，用来生成 Word 原生公式；Edge 或 Chrome，用来导出 PDF
 
-### 安装并运行
+#### 安装并运行
 
 ```bash
 git clone https://github.com/DarkMoonWarrior/Tetra.git

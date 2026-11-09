@@ -24,9 +24,30 @@
 
 `data/blueprint_specs.json` 由 `tools/build_blueprint_specs.py` 生成。每条有两种写法：`topic` 是纯文本，用于输入框、搜索和发给模型；`topic_tex` 是排版写法，公式写在 `$…$` 里，手写在 `tools/blueprint_tex.json`。两者的中文对不上时，构建会报错。
 
+## 打包桌面程序（Windows）
+
+桌面版是 PyInstaller 打出来的一个文件夹（`Tetra.exe` 加 `_internal/`），再做成安装程序和免安装的 zip：
+
+```bash
+.venv\Scripts\python -m pip install pyinstaller
+winget install --id JRSoftware.InnoSetup -e --scope user
+.venv\Scripts\python packaging\build_windows.py
+```
+
+- 结果：`dist/Tetra-Setup-<版本>.exe`（安装程序）、`dist/Tetra-<版本>-windows-x64.zip`（免安装版）和 `dist/Tetra/`（版本号取 `pyproject.toml`）。没装 Inno Setup 时只出 zip。`dist/`、`build/` 不进仓库。
+- 安装程序由 `packaging/tetra.iss`（Inno Setup 6）生成：默认只为当前用户装在 `%LOCALAPPDATA%\Programs\Tetra`，可以选位置、选为所有用户装；可选桌面快捷方式和开机自启（写的是和设置页同一个注册表项）；`AppMutex=TetraDesktopApp` 让安装、卸载时先请用户关掉 Tetra；卸载时会问要不要删 `%LOCALAPPDATA%\Tetra`。中文界面文字在 `packaging/ChineseSimplified.isl`（Inno Setup 没有自带简体中文，按 `Default.isl` 全部 296 条翻译），必须存成带 BOM 的 UTF-8，打包脚本会检查。
+- 桌面版的设置页（`web/js/settings.js` 的 `desktopSection`）调 `/api/desktop*` 接口，和系统打交道的部分在 `mingti/desktop_os.py`：开机自启写 `HKCU\...\Run\Tetra`，快捷方式用 PowerShell 的 WScript.Shell 建，选文件夹、另存为用 tkinter 的系统对话框，偏好存在 `%LOCALAPPDATA%\Tetra\desktop.json`。换数据文件夹先记成 `data_dir_next`，下次启动时（服务打开数据库之前）由 `desktop.py` 复制过去。
+- 页面每次请求都带 `X-Tetra-Page`（页面编号），关掉时用 `sendBeacon` 发 `/api/page-closed`；桌面版窗口的编号固定是 `desktop-window`，窗口关了由 `desktop.py` 替它去掉。没有开着的页面、也没有题在出时，桌面版就退出。
+- 入口是 `mingti/desktop.py`：起服务（和 `tetra` 命令同一个服务），用 Edge / Chrome 的 `--app` 模式开窗口，单独的浏览器资料目录；用锁文件保证只有一个服务，后开的只开窗口；窗口关了以后，还有题在出、或者还有开着的页面（150 秒内来问过、又没说自己关了），就接着跑。设置页里点“现在重新打开 Tetra”时，它关掉窗口和服务，再起一个新的自己。
+- `packaging/tetra.spec` 只带程序自带的文件（`web/`、知识树、示例要求、专题识别模型）。打包脚本最后会检查结果里有没有 `.env`、`models.json`、`profile.json`、`.sqlite3`，有就报错。
+- 打包后的路径见 `mingti/config.py`：自带的文件在解包目录（`sys._MEIPASS`），会变的数据在 `%LOCALAPPDATA%\Tetra`（`TETRA_HOME` 可以改）。从源码运行时不变，仍在 `data/runtime/`。
+- 图标 `packaging/tetra.ico` 由 `packaging/make_icon.py` 从网页的小图标画出来。
+- 程序没有签名，第一次运行时 Windows SmartScreen 会提示；要去掉提示得买代码签名证书。
+- 测试打包结果时设 `TETRA_HOME` 指向一个临时文件夹，`TETRA_PORT` 换一个端口，就不会碰到自己的数据和正在跑的服务。
+
 ## 运行数据
 
-运行数据都在 `data/runtime/`，不进仓库：
+运行数据都在 `data/runtime/`（桌面版在 `%LOCALAPPDATA%\Tetra\data`），不进仓库：
 
 | 文件 | 内容 |
 |---|---|

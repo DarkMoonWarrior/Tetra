@@ -170,6 +170,8 @@ const ICONS = {
   'folder-plus': '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M12 10v6M9 13h6"/>',
   'folder-move': '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 13h6M13 10.5l2.5 2.5-2.5 2.5"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18Z"/>',
+  monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
 };
 
 export function svg(name) {
@@ -368,10 +370,27 @@ export function renderMath(root) {
 // 并通知页面在顶部常驻"连不上服务"、自动重连
 export const OFFLINE_MESSAGE = '连不上服务：可能已经关掉了。在终端输入 tetra 重新启动，连上后页面会自动恢复。';
 
+// 这个页面的编号：每次请求都带上（X-Tetra-Page），页面关掉时告诉服务一声。桌面版据此判断还有没有开着的页面，
+// 都关了才退出。桌面版自己的窗口地址带 ?window=desktop，编号固定（窗口关了由桌面版替它说）
+export const PAGE_ID = new URLSearchParams(window.location.search).get('window') === 'desktop'
+  ? 'desktop-window'
+  : (window.crypto?.randomUUID?.() || `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`);
+window.addEventListener('pagehide', () => {
+  try {
+    navigator.sendBeacon?.('/api/page-closed', PAGE_ID);
+  } catch {
+    // 发不出去也没关系：两三分钟不来问，服务就当这个页面关了
+  }
+});
+
+// 运行环境（settings.js 启动时读 /api/health 填上）：desktop 是桌面版窗口里打开的 { address }；dataDir 是数据文件夹
+export const runtime = { desktop: null, dataDir: '' };
+
 export async function request(path, options = {}) {
   let response;
+  const { headers, ...rest } = options;
   try {
-    response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
+    response = await fetch(path, { ...rest, headers: { 'Content-Type': 'application/json', 'X-Tetra-Page': PAGE_ID, ...headers } });
   } catch {
     window.dispatchEvent(new Event('tetra:offline'));
     throw new Error(OFFLINE_MESSAGE);
@@ -505,13 +524,27 @@ export function pips(level) {
 }
 
 let toastTimer = null;
-export function toast(message) {
+// actions：提示后面跟的按钮 [{ label, onClick }]（比如"打开文件夹"）；带按钮的多停一会儿，鼠标停在上面时不消失
+export function toast(message, actions = []) {
   const node = $('#toast');
-  node.textContent = message;
+  node.replaceChildren(el('span', 'toast-text', message));
+  for (const action of actions) {
+    const button = el('button', 'toast-action', action.label);
+    button.type = 'button';
+    button.addEventListener('click', () => {
+      node.hidden = true;
+      action.onClick();
+    });
+    node.append(button);
+  }
+  node.classList.toggle('with-actions', actions.length > 0);
   node.hidden = false;
   node.classList.remove('show');
   void node.offsetWidth;
   node.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { node.hidden = true; }, 2800);
+  const hide = () => { toastTimer = setTimeout(() => { node.hidden = true; }, actions.length ? 7000 : 2800); };
+  node.onmouseenter = actions.length ? () => clearTimeout(toastTimer) : null;
+  node.onmouseleave = actions.length ? hide : null;
+  hide();
 }

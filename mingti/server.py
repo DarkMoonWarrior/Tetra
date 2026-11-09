@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import uuid
 from datetime import datetime, timezone
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
@@ -16,7 +18,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mingti import context, organize
+from mingti import context, desktop_os, organize
 from mingti.answer_key import condense, model_call
 from mingti.assemble import AssemblyManager
 from mingti.assistant import Assistant, bank_summary
@@ -59,10 +61,19 @@ assemblies = AssemblyManager(manager, bank, store, models, lambda edition: _curr
 
 app = FastAPI(title="命题智能体")
 
+# 桌面程序（mingti/desktop.py）：窗口关了以后，看还有没有开着的页面、有没有题在出，决定什么时候退出
+DESKTOP = os.environ.get("TETRA_DESKTOP") == "1"
+# 开着的页面：页面编号（每次请求带在 X-Tetra-Page 里）→ 最近一次来问的时间；页面关掉时发 /api/page-closed 去掉
+PAGES: dict[str, float] = {}
+RESTART_REQUESTED = False  # 设置里点了"重新打开 Tetra"（换数据文件夹以后）
+
 
 @app.middleware("http")
 async def revalidate_assets(request, call_next):
     """界面文件每次都向服务端确认是否有更新，改完代码刷新就能看到，不会用到旧的缓存。"""
+    page = request.headers.get("x-tetra-page")
+    if page and request.url.path.startswith("/api/") and request.url.path != "/api/page-closed":
+        PAGES[page[:60]] = time.monotonic()
     response = await call_next(request)
     if not request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-cache"
@@ -91,13 +102,37 @@ def _ui_version() -> str:
 
 
 @app.get("/api/health")
-def health() -> dict:
+def health(request: Request) -> dict:
     return {
         "ready": manager.ready,
         "default_model": models.default_id,
         "prompt_revision": PROMPT_REVISION,
         "ui_version": _ui_version(),
+        # 桌面程序里打开的：菜单里多一项"在浏览器中打开"（同一个服务，用平时的浏览器也能用）
+        "desktop": DESKTOP,
+        "address": str(request.base_url).rstrip("/"),
+        "data_dir": str(RUNTIME_DIR),
     }
+
+
+@app.post("/api/page-closed")
+async def page_closed(request: Request) -> dict:
+    """页面关掉时（pagehide）用 sendBeacon 发来自己的编号：桌面版据此判断还有没有开着的页面。"""
+    page = (await request.body()).decode("utf-8", errors="ignore").strip()[:60]
+    PAGES.pop(page, None)
+    return {"ok": True}
+
+
+@app.post("/api/open-browser")
+def open_in_browser(request: Request) -> dict:
+    """桌面程序的窗口里点"在浏览器中打开"：用电脑上默认的浏览器打开这个应用。"""
+    import webbrowser
+
+    address = str(request.base_url).rstrip("/")
+    if not DESKTOP or not re.fullmatch(r"http://(127\.0\.0\.1|localhost):\d+", address):
+        raise HTTPException(400, "只有桌面程序里能用")
+    webbrowser.open(address)
+    return {"opened": address}
 
 
 @app.get("/api/models")
@@ -997,8 +1032,8 @@ def print_paper(
     return print_html(_paper_or_404(paper_id), answers=answers, auto_print=auto, part=part, dark=dark)
 
 
-@app.get("/api/papers/{paper_id}/export")
-def export_paper(paper_id: str, request: Request, format: Literal["docx", "pdf"] = "docx", answers: bool = True) -> Response:
+def _paper_file(paper_id: str, request: Request, format: str, answers: bool) -> tuple[bytes, str, str]:
+    """生成一份试卷文件：(内容, 文件名, 类型)。"""
     paper = _paper_or_404(paper_id)
     name = f"{paper['title']}{'（含答案）' if answers else ''}"
     try:
@@ -1018,7 +1053,192 @@ def export_paper(paper_id: str, request: Request, format: Literal["docx", "pdf"]
             media = "application/pdf"
     except ExportError as exc:
         raise HTTPException(503, str(exc)) from exc
-    return _download(content, f"{name}.{format}", f"paper.{format}", media)
+    return content, f"{name}.{format}", media
+
+
+@app.get("/api/papers/{paper_id}/export")
+def export_paper(paper_id: str, request: Request, format: Literal["docx", "pdf"] = "docx", answers: bool = True) -> Response:
+    content, name, media = _paper_file(paper_id, request, format, answers)
+    return _download(content, name, f"paper.{format}", media)
+
+
+class SaveRequest(BaseModel):
+    format: Literal["docx", "pdf"] = "docx"
+    answers: bool = True
+    ask: bool | None = None  # None：按桌面版设置（每次问 / 存到固定文件夹）；True：这次弹另存为
+
+
+@app.post("/api/papers/{paper_id}/save")
+def save_paper(paper_id: str, payload: SaveRequest, request: Request) -> dict:
+    """桌面版导出：直接存到设置里的文件夹（默认"文档\\Tetra"），或者弹系统的另存为对话框。"""
+    _desktop_only()
+    content, name, _media = _paper_file(paper_id, request, payload.format, payload.answers)
+    prefs = desktop_os.load_prefs()
+    folder = desktop_os.export_dir(prefs)
+    ask = prefs["export_ask"] if payload.ask is None else payload.ask
+    if ask:
+        chosen = desktop_os.pick_save_file("保存试卷", folder if folder.exists() else desktop_os.documents(), name)
+        if not chosen:
+            return {"cancelled": True}
+        target = Path(chosen)
+    else:
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(400, f"保存的文件夹建不了：{folder}。可以在「个人设置 → 桌面版」里换一个") from exc
+        target = desktop_os.unique_path(folder, name)
+    try:
+        target.write_bytes(content)
+    except OSError as exc:
+        raise HTTPException(400, f"没存进去（{exc.strerror or exc}）：文件可能正开着，关掉以后再试") from exc
+    return {"path": str(target), "name": target.name, "folder": str(target.parent)}
+
+
+# ---------- 桌面版的设置：开机自启、快捷方式、导出文件夹、数据文件夹 ----------
+
+
+def _desktop_only() -> None:
+    if not DESKTOP:
+        raise HTTPException(400, "只有桌面版里能用")
+
+
+def _desktop_view() -> dict:
+    prefs = desktop_os.load_prefs()
+    return {
+        "frozen": desktop_os.exe() is not None,
+        "installed": desktop_os.installed(),
+        "app_dir": str(Path(desktop_os.exe()).parent) if desktop_os.exe() else "",
+        "autostart": desktop_os.autostart_enabled(),
+        "autostart_minimized": bool(prefs["autostart_minimized"]),
+        "shortcuts": desktop_os.shortcuts(),
+        "export_dir": str(desktop_os.export_dir(prefs)),
+        "export_dir_default": not prefs["export_dir"],
+        "export_ask": bool(prefs["export_ask"]),
+        "data_dir": str(RUNTIME_DIR),
+        "data_dir_next": prefs["data_dir_next"],
+        "logs_dir": str(desktop_os.home() / "logs"),
+    }
+
+
+class DesktopPatch(BaseModel):
+    autostart: bool | None = None
+    autostart_minimized: bool | None = None
+    desktop_shortcut: bool | None = None
+    start_menu_shortcut: bool | None = None
+    export_dir: str | None = Field(default=None, max_length=500)  # 空字符串：恢复成默认的"文档\Tetra"
+    export_ask: bool | None = None
+
+
+@app.get("/api/desktop")
+def desktop_settings() -> dict:
+    _desktop_only()
+    return _desktop_view()
+
+
+@app.patch("/api/desktop")
+def update_desktop_settings(payload: DesktopPatch) -> dict:
+    _desktop_only()
+    try:
+        if payload.autostart is not None:
+            desktop_os.set_autostart(payload.autostart)
+        if payload.desktop_shortcut is not None:
+            desktop_os.set_shortcut("desktop", payload.desktop_shortcut)
+        if payload.start_menu_shortcut is not None:
+            desktop_os.set_shortcut("start_menu", payload.start_menu_shortcut)
+    except (RuntimeError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    changes = {key: value for key, value in payload.model_dump().items()
+               if key in ("autostart_minimized", "export_ask") and value is not None}
+    if payload.export_dir is not None:
+        changes["export_dir"] = payload.export_dir.strip()
+    if changes:
+        desktop_os.save_prefs(changes)
+    return _desktop_view()
+
+
+class PickRequest(BaseModel):
+    purpose: Literal["export", "data"]
+
+
+@app.post("/api/desktop/pick-folder")
+def pick_desktop_folder(payload: PickRequest) -> dict:
+    """弹系统的选文件夹对话框（在 Tetra 窗口前面）；点了取消返回 path = null。"""
+    _desktop_only()
+    if payload.purpose == "export":
+        initial, title = desktop_os.export_dir(), "导出的 Word、PDF 存到哪个文件夹"
+    else:
+        initial, title = RUNTIME_DIR.parent, "把 Tetra 的数据放到哪个文件夹"
+    return {"path": desktop_os.pick_folder(title, initial if initial.exists() else None)}
+
+
+class OpenRequest(BaseModel):
+    target: Literal["file", "folder", "export", "data", "logs", "app"]
+    path: str | None = Field(default=None, max_length=1000)  # target 为 file / folder 时：刚导出的那个文件
+
+
+@app.post("/api/desktop/open")
+def open_desktop_path(payload: OpenRequest) -> dict:
+    """在资源管理器里打开：刚导出的文件（或它所在的文件夹并选中它）、导出文件夹、数据文件夹、日志、程序所在的文件夹。"""
+    _desktop_only()
+    places = {
+        "export": desktop_os.export_dir(), "data": RUNTIME_DIR, "logs": desktop_os.home() / "logs",
+        "app": Path(desktop_os.exe()).parent if desktop_os.exe() else None,
+    }
+    if payload.target in ("file", "folder"):
+        path = Path(payload.path or "")
+        if not path.is_file():
+            raise HTTPException(404, "文件不在了（可能已经移走或删掉了）")
+        if payload.target == "file":
+            desktop_os.open_path(path)
+        else:
+            desktop_os.reveal(path)
+        return {"opened": str(path)}
+    place = places[payload.target]
+    if place is None:
+        raise HTTPException(400, "从源码运行时没有程序文件夹")
+    Path(place).mkdir(parents=True, exist_ok=True)
+    desktop_os.open_path(Path(place))
+    return {"opened": str(place)}
+
+
+class DataDirRequest(BaseModel):
+    path: str = Field(default="", max_length=500)  # 空字符串：取消还没搬的那次更换
+
+
+@app.post("/api/desktop/data-dir")
+def change_data_dir(payload: DataDirRequest) -> dict:
+    """换数据文件夹：先记下来，下次打开 Tetra 时把数据复制过去（服务开着时数据库在用，不能当场搬）。"""
+    _desktop_only()
+    if not payload.path.strip():
+        desktop_os.save_prefs({"data_dir_next": ""})
+        return _desktop_view()
+    try:
+        target = desktop_os.check_data_target(payload.path.strip())
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    desktop_os.save_prefs({"data_dir_next": str(target)})
+    return _desktop_view()
+
+
+@app.post("/api/desktop/restart")
+def restart_desktop() -> dict:
+    """重新打开 Tetra（换了数据文件夹以后马上生效）：还有题在出时不能重启。"""
+    global RESTART_REQUESTED
+    _desktop_only()
+    if _anything_running():
+        raise HTTPException(409, "还有题在出，等出完再重新打开")
+    RESTART_REQUESTED = True
+    return {"restarting": True}
+
+
+def _anything_running() -> bool:
+    with manager._lock:
+        tasks = [*manager._jobs.values(), *manager._batches.values()]
+    with assemblies._lock:
+        tasks += list(assemblies._assemblies.values())
+    with importer._lock:
+        tasks += list(importer._jobs.values())
+    return any(task.finished_at is None for task in tasks)
 
 
 @app.get("/api/profile/export")

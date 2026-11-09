@@ -92,6 +92,7 @@ FastAPI  mingti/server.py
 | `mingti/curriculum/` `mingti/curriculum_tree.py` | 知识树：人教 A 版（5 册 18 章 71 节 302 个知识点）、人教 B 版（7 册 17 章 53 节 302 个知识点） |
 | `mingti/math_verifier/` `mingti/model_operations/` | 程序验证规则；模型调用的耗时与 Token 记录 |
 | `mingti/launcher.py` `run.py` `pyproject.toml` | `tetra` 启动命令：首次运行时准备 `.venv`，然后启动服务、打开浏览器 |
+| `mingti/desktop.py` `mingti/desktop_os.py` `packaging/` | 桌面版：起服务、用 Edge / Chrome 的应用模式开窗口、只开一个服务、开机自启、快捷方式、导出位置、换数据文件夹；PyInstaller 打包配置、Inno Setup 安装程序、图标和打包脚本 |
 | `web/` | 界面：`index.html`、`app.css`，`js/` 下按功能分文件；KaTeX 在 `vendor/` |
 | `data/curriculum/` | 两版教材的知识树 CSV |
 | `data/blueprint_specs.json` | 171 条示例命题要求，首页的示例从这里抽 |
@@ -113,4 +114,5 @@ FastAPI  mingti/server.py
 | 文件夹 | `GET/POST /api/bank/folders`、`PATCH/DELETE /api/bank/folders/{id}`、`POST /api/bank/move` |
 | 试卷 | `GET/POST /api/papers`、`GET/PUT/DELETE /api/papers/{id}`、`GET /api/papers/{id}/print`、`/export` |
 | 设置与模型 | `GET/PATCH /api/profile`、`POST /api/profile/reset`、`GET /api/profile/export`；`/api/model-services`、`GET /api/models` |
+| 桌面版 | `GET/PATCH /api/desktop`、`POST /api/desktop/pick-folder`、`/open`、`/data-dir`、`/restart`；`POST /api/papers/{id}/save`；`POST /api/open-browser`、`POST /api/page-closed` |
 | 其他 | `GET /api/health`、`/api/curriculum`、`/api/blueprints`、`/api/counts`、`/api/questions` |

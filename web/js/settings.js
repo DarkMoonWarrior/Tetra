@@ -3,7 +3,7 @@
 // 建议要你点"采用"才生效；可以导出，也可以一次删掉全部偏好（出题记录不受影响）。
 
 import {
-  $, DETAIL, DIFFICULTY_LABEL, MODES, PURPOSES, THINKING, TYPE_LABEL, el, formatWhen, modelName, request, segmented,
+  $, DETAIL, DIFFICULTY_LABEL, MODES, PURPOSES, THINKING, TYPE_LABEL, el, formatWhen, modelName, request, runtime, segmented,
   strongModel, svg, toast,
 } from './shared.js';
 import { applyTheme } from './theme.js';
@@ -18,6 +18,11 @@ const SECTIONS = [
   { id: 'learning', name: '偏好学习', icon: 'bulb' },
   { id: 'data', name: '数据与隐私', icon: 'shield' },
 ];
+
+// 设置里的各页：桌面版窗口里多一页"桌面版"（开机自启、快捷方式、导出位置、数据文件夹）
+function sections() {
+  return runtime.desktop ? [...SECTIONS, { id: 'desktop', name: '桌面版', icon: 'monitor' }] : SECTIONS;
+}
 
 // 读不到服务端设置时按这个来，和后端 Profile 的默认值一致
 const FALLBACK = {
@@ -187,7 +192,7 @@ function renderMenu() {
   who.append(el('b', '', p.display_name || '个人设置'));
   card.append(avatar, who);
   menu.append(card);
-  for (const item of SECTIONS) {
+  for (const item of sections()) {
     const button = el('button', 'account-item');
     button.type = 'button';
     button.setAttribute('role', 'menuitem');
@@ -201,9 +206,37 @@ function renderMenu() {
     });
     menu.append(button);
   }
+  // 桌面程序的窗口里：多一项"在浏览器中打开"（同一个服务，平时用的浏览器也能用，地址写在下面）
+  const desktop = runtime.desktop;
+  if (desktop) {
+    const button = el('button', 'account-item');
+    button.type = 'button';
+    button.setAttribute('role', 'menuitem');
+    button.innerHTML = svg('globe');
+    const words = el('span');
+    words.append(el('b', '', '在浏览器中打开'), el('small', '', desktop.address));
+    button.append(words);
+    button.addEventListener('click', async () => {
+      closeMenu();
+      try {
+        await request('/api/open-browser', { method: 'POST' });
+      } catch (error) {
+        toast(error.message);
+      }
+    });
+    menu.append(button);
+  }
   // 连接正常时不显示；只有出了问题（没有可用的模型、连不上本机服务）才在菜单底部说一句
   const health = ctx.health();
   if (!health.ok) menu.append(el('p', 'account-status bad', health.text));
+}
+
+// 是不是桌面程序打开的（/api/health 的 desktop）：runtime.desktop = { address } 或 null；顺便记下数据文件夹
+function checkDesktop() {
+  request('/api/health').then((info) => {
+    runtime.desktop = info.desktop ? { address: info.address } : null;
+    runtime.dataDir = info.data_dir || '';
+  }).catch(() => {});
 }
 
 function openMenu() {
@@ -224,7 +257,7 @@ function closeMenu() {
 // ---------- 设置窗口 ----------
 
 export function openSettings(id = 'profile') {
-  section = SECTIONS.some((item) => item.id === id) ? id : 'profile';
+  section = sections().some((item) => item.id === id) ? id : 'profile';
   renderTabs();
   renderSection();
   const updated = profile().updated_at;
@@ -238,7 +271,7 @@ function renderTabs() {
   const tabs = $('#settingsTabs');
   const hadFocus = tabs.contains(document.activeElement);
   tabs.innerHTML = '';
-  for (const item of SECTIONS) {
+  for (const item of sections()) {
     const tab = el('button', 'settings-tab');
     tab.type = 'button';
     tab.id = `settings-tab-${item.id}`;
@@ -261,7 +294,7 @@ function renderTabs() {
 }
 
 function renderSection() {
-  $('#settingsSectionTitle').textContent = SECTIONS.find((item) => item.id === section).name;
+  $('#settingsSectionTitle').textContent = sections().find((item) => item.id === section).name;
   const body = $('#settingsBody');
   body.innerHTML = '';
   body.append(BUILDERS[section]());
@@ -899,8 +932,8 @@ function dataSection() {
   const wrap = el('div');
   const privacy = el('p', 'privacy');
   privacy.append(
-    '个人设置和出题记录都保存在这台电脑上（项目里的 ',
-    el('code', '', 'data/runtime'),
+    '个人设置、题库和出题记录都保存在这台电脑上（',
+    el('code', '', runtime.dataDir || 'data/runtime'),
     ' 文件夹），不会上传。出题时，题目要求会发给你选的模型服务（你接入的大模型）来生成题目。',
   );
   const exportLink = el('a', 'btn', '导出 JSON');
@@ -978,6 +1011,129 @@ function appearanceSection() {
   return wrap;
 }
 
+// ---------- 桌面版：开机自启、快捷方式、导出的文件存到哪、数据文件夹（只在桌面版窗口里有这一页） ----------
+
+async function desktopCall(path, body = null, method = 'POST') {
+  return request(path, body === null ? { method } : { method, body: JSON.stringify(body) });
+}
+
+function pathLine(path) {
+  const line = el('p', 'path-line');
+  line.append(el('code', '', path));
+  return line;
+}
+
+function desktopSection() {
+  const wrap = el('div', 'desktop-settings');
+  wrap.append(el('p', 'settings-intro', '正在读取…'));
+  let view = null;
+  const update = async (changes, message = '已保存') => {
+    try {
+      view = await desktopCall('/api/desktop', changes, 'PATCH');
+      setStatus(message);
+    } catch (error) {
+      setStatus(error.message, true);
+      view = await desktopCall('/api/desktop', null, 'GET').catch(() => view);
+    }
+    draw();
+  };
+  const open = (target) => desktopCall('/api/desktop/open', { target }).catch((error) => setStatus(error.message, true));
+  const pick = async (purpose) => {
+    try {
+      const { path } = await desktopCall('/api/desktop/pick-folder', { purpose });
+      if (!path) return;
+      if (purpose === 'export') {
+        await update({ export_dir: path }, '导出的文件以后存到新的文件夹');
+        return;
+      }
+      view = await desktopCall('/api/desktop/data-dir', { path });
+      setStatus('记下了：下次打开 Tetra 时把数据复制过去');
+      draw();
+    } catch (error) {
+      setStatus(error.message, true);
+    }
+  };
+
+  function draw() {
+    wrap.replaceChildren();
+    const locked = new Set(view.shortcuts.locked || []);
+    const where = view.frozen
+      ? `${view.installed ? '安装版' : '免安装版'}，程序在 ${view.app_dir}`
+      : '从源码运行的桌面窗口：开机自启和快捷方式要用打包好的 Tetra.exe 才能设置';
+    wrap.append(el('p', 'settings-intro', `这些设置只在桌面版里有。${where}。`));
+
+    const auto = switchRow('开机时自动启动 Tetra', '登录 Windows 以后自动打开，出题、组卷随时能用。', view.autostart,
+      (on) => update({ autostart: on }, on ? '已设为开机自动启动' : '已取消开机自动启动'));
+    const autoMin = switchRow('开机启动时窗口最小化', '只在任务栏里出现，不挡住别的窗口；需要时再点开。', view.autostart_minimized,
+      (on) => update({ autostart_minimized: on }));
+    autoMin.hidden = !view.autostart;
+    const desk = switchRow('桌面快捷方式', locked.has('desktop') ? '这是安装时为所有用户建的，要用管理员权限才能删。' : '在桌面上放一个 Tetra 图标。',
+      view.shortcuts.desktop, (on) => update({ desktop_shortcut: on }, on ? '已在桌面创建快捷方式' : '已删掉桌面快捷方式'));
+    const menu = switchRow('开始菜单快捷方式', locked.has('start_menu') ? '这是安装时为所有用户建的，要用管理员权限才能删。' : '在开始菜单里放一个 Tetra，也能在 Windows 搜索里找到。',
+      view.shortcuts.start_menu, (on) => update({ start_menu_shortcut: on }, on ? '已添加到开始菜单' : '已从开始菜单移除'));
+    for (const row of [auto, desk, menu]) {
+      if (!view.frozen) row.querySelector('.switch').disabled = true;
+    }
+
+    const exportRow = el('div', 'path-actions');
+    exportRow.append(button('选择文件夹…', 'btn', () => pick('export')), button('打开', 'btn', () => open('export')));
+    if (!view.export_dir_default) exportRow.append(button('恢复默认（文档\\Tetra）', 'link-btn', () => update({ export_dir: '' }, '已恢复成默认的文件夹')));
+    const ask = switchRow('每次导出都问存到哪', '打开时，每次导出都弹出“另存为”，自己选位置和文件名；关掉时直接存进上面的文件夹，存好后可以点“打开文件夹”。',
+      view.export_ask, (on) => update({ export_ask: on }));
+
+    const dataRow = el('div', 'path-actions');
+    dataRow.append(button('打开', 'btn', () => open('data')), button('更改…', 'btn', () => pick('data')));
+    const dataNotes = [];
+    if (view.data_dir_next) {
+      const pending = el('div', 'pending-move');
+      pending.append(
+        el('p', '', `下次打开 Tetra 时，数据会复制到：${view.data_dir_next}（原来的文件夹原样保留，确认没问题以后可以自己删）。`),
+      );
+      const row = el('div', 'path-actions');
+      row.append(
+        button('现在重新打开 Tetra', 'btn primary', async () => {
+          try {
+            await desktopCall('/api/desktop/restart');
+            setStatus('正在重新打开 Tetra…');
+          } catch (error) {
+            setStatus(error.message, true);
+          }
+        }),
+        button('不换了', 'link-btn', async () => {
+          view = await desktopCall('/api/desktop/data-dir', { path: '' });
+          setStatus('已取消更换数据文件夹');
+          draw();
+        }),
+      );
+      pending.append(row);
+      dataNotes.push(pending);
+    }
+
+    const logRow = el('div', 'path-actions');
+    logRow.append(button('打开日志文件夹', 'btn', () => open('logs')));
+    if (view.frozen) logRow.append(button('打开程序所在的文件夹', 'btn', () => open('app')));
+
+    wrap.append(
+      el('h3', 'settings-group', '启动'),
+      auto,
+      autoMin,
+      el('h3', 'settings-group', '快捷方式'),
+      desk,
+      menu,
+      el('h3', 'settings-group', '文件'),
+      field('导出的 Word、PDF 存到哪', '在试卷、组卷里点“导出 Word / PDF”时存到这里。', [pathLine(view.export_dir), exportRow]),
+      ask,
+      field('数据文件夹', '题库、试卷、对话、设置和 API Key 都在这里。换位置时先记下来，下次打开 Tetra 时把数据复制过去。', [pathLine(view.data_dir), dataRow, ...dataNotes]),
+      field('出了问题', '日志里记着出错的详情。', logRow),
+    );
+  }
+
+  desktopCall('/api/desktop', null, 'GET').then((data) => { view = data; draw(); }).catch((error) => {
+    wrap.replaceChildren(el('p', 'settings-intro', `没读出桌面版的设置：${error.message}`));
+  });
+  return wrap;
+}
+
 const BUILDERS = {
   profile: profileSection,
   appearance: appearanceSection,
@@ -986,10 +1142,12 @@ const BUILDERS = {
   agent: agentSection,
   learning: learningSection,
   data: dataSection,
+  desktop: desktopSection,
 };
 
 export function initSettings(context) {
   ctx = { ...ctx, ...context };
+  checkDesktop();
   $('#accountBtn').addEventListener('click', (event) => {
     event.stopPropagation();
     if (menuOpen) closeMenu();

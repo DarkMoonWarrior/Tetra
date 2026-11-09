@@ -353,6 +353,7 @@ export const EN = {
 "撤销": "Undo",
 "正在生成 PDF…": "Generating PDF…",
 "正在生成 Word…": "Generating Word…",
+"打开文件夹": "Open folder",
 "在题库里勾选题目，点「用选中的题组卷」；也可以先建一份空白试卷，再从题库添加。组好后可以导出 Word 或 PDF。": "Tick questions in the question bank and click \"Assemble a paper with selected questions\". Or create a blank paper first and add questions from the bank. When done, export it as Word or PDF.",
 "新建空白试卷": "New blank paper",
 "去题库挑题": "Pick questions from question bank",
@@ -413,6 +414,7 @@ export const EN = {
 "出题方式与模型": "Generation method & models",
 "偏好学习": "Preference learning",
 "数据与隐私": "Data & privacy",
+"桌面版": "Desktop version",
 "删除全部偏好": "Delete all preferences",
 "已切换模型": "Model switched",
 "已保存": "Saved",
@@ -423,6 +425,7 @@ export const EN = {
 "这张图片打不开，换一张试试": "Can't open this image. Try another one",
 "个人设置": "Settings",
 "称呼、出题偏好、模型": "Name, generation preferences, models",
+"在浏览器中打开": "Open in browser",
 "改动会自动保存": "Changes save automatically",
 "换一张": "Change",
 "上传头像": "Upload avatar",
@@ -543,7 +546,7 @@ export const EN = {
 "会接入这几个模型": "These models will be connected",
 "接入后在「出题方式与模型」里选用；以后可以在\"修改\"里增删型号。": "After connecting, select in \"Generation method and models\"; models can be added or removed later in \"Edit\".",
 "接入其他模型服务": "Connect another model service",
-"个人设置和出题记录都保存在这台电脑上（项目里的": "Settings and generation records are stored only on this computer (in the project's",
+"个人设置、题库和出题记录都保存在这台电脑上（": "Settings, question bank, and generation history are all stored on this computer (",
 "文件夹），不会上传。出题时，题目要求会发给你选的模型服务（你接入的大模型）来生成题目。": "folder) and are never uploaded. When generating, the question requirements are sent to the model service you selected (the LLM you connected) to generate questions.",
 "导出 JSON": "Export JSON",
 "正在删除…": "Deleting…",
@@ -562,6 +565,46 @@ export const EN = {
 "界面上的文字用哪种语言（Interface language）。题目、解析这些内容不翻译；切换后页面会刷新一下。": "The language used for interface text (Interface language). Questions, solutions, and other content are not translated; the page will refresh after switching.",
 "中文": "Chinese",
 "已切换成中文": "Switched to Chinese",
+"导出的文件以后存到新的文件夹": "Exported files will be saved to the new folder from now on",
+"记下了：下次打开 Tetra 时把数据复制过去": "Got it: your data will be copied over the next time you open Tetra",
+"安装版": "Installed version",
+"免安装版": "Portable version",
+"从源码运行的桌面窗口：开机自启和快捷方式要用打包好的 Tetra.exe 才能设置": "Desktop window running from source: auto-start and shortcuts require the packaged Tetra.exe",
+"开机时自动启动 Tetra": "Launch Tetra at startup",
+"登录 Windows 以后自动打开，出题、组卷随时能用。": "Opens automatically after you sign in to Windows, so generating and assembling are always ready.",
+"已设为开机自动启动": "Tetra will launch at startup",
+"已取消开机自动启动": "Auto-start disabled",
+"开机启动时窗口最小化": "Minimize window at startup",
+"只在任务栏里出现，不挡住别的窗口；需要时再点开。": "Appears only in the taskbar so it doesn't block other windows; click to open when needed.",
+"桌面快捷方式": "Desktop shortcut",
+"这是安装时为所有用户建的，要用管理员权限才能删。": "Created for all users during installation; administrator permission is required to remove it.",
+"在桌面上放一个 Tetra 图标。": "Place a Tetra icon on the desktop.",
+"已在桌面创建快捷方式": "Desktop shortcut created",
+"已删掉桌面快捷方式": "Desktop shortcut removed",
+"开始菜单快捷方式": "Start menu shortcut",
+"在开始菜单里放一个 Tetra，也能在 Windows 搜索里找到。": "Add Tetra to the Start menu and make it searchable in Windows.",
+"已添加到开始菜单": "Added to Start menu",
+"已从开始菜单移除": "Removed from Start menu",
+"选择文件夹…": "Choose folder…",
+"恢复默认（文档\\Tetra）": "Restore default (Documents\\Tetra)",
+"已恢复成默认的文件夹": "Restored the default folder",
+"每次导出都问存到哪": "Ask where to save on every export",
+"打开时，每次导出都弹出“另存为”，自己选位置和文件名；关掉时直接存进上面的文件夹，存好后可以点“打开文件夹”。": "When enabled, each export opens a Save As dialog so you can choose the location and file name; when disabled, files are saved directly to the folder above and you can click Open folder afterwards.",
+"更改…": "Change…",
+"现在重新打开 Tetra": "Reopen Tetra now",
+"正在重新打开 Tetra…": "Reopening Tetra…",
+"不换了": "Keep current folder",
+"已取消更换数据文件夹": "Data folder change cancelled",
+"打开日志文件夹": "Open logs folder",
+"打开程序所在的文件夹": "Open program folder",
+"启动": "Startup",
+"快捷方式": "Shortcuts",
+"导出的 Word、PDF 存到哪": "Where exported Word and PDF files are saved",
+"在试卷、组卷里点“导出 Word / PDF”时存到这里。": "Files are saved here when you click Export Word / PDF in a paper or while assembling a paper.",
+"数据文件夹": "Data folder",
+"题库、试卷、对话、设置和 API Key 都在这里。换位置时先记下来，下次打开 Tetra 时把数据复制过去。": "The question bank, papers, chats, settings, and API keys are all stored here. When changing the location, note it down; your data will be copied over the next time you open Tetra.",
+"出了问题": "Something went wrong",
+"日志里记着出错的详情。": "Details of the error are recorded in the logs.",
 "多选题": "Multiple choice",
 "基础": "Basic",
 "较易": "Easy",
@@ -736,6 +779,8 @@ export const EN = {
 "没识别到答案": "No answer recognized",
 "没对上考点": "No topic matched",
 "命题智能体": "Composer agent",
+"重新打开 Tetra": "Reopen Tetra",
+"只有桌面程序里能用": "Only available in the desktop app",
 "请先填写 API Key": "Please fill in the API Key first",
 "这个模型服务不存在（可能已经删掉了）": "This model service does not exist (it may have been deleted)",
 "请先填写要测试的型号": "Please fill in the model to test first",
@@ -760,6 +805,14 @@ export const EN = {
 "这次导入不存在（服务重启后要重新上传）": "This import does not exist (re-upload after a service restart)",
 "试卷不存在（可能已经删掉了）": "Paper does not exist (it may have been deleted)",
 "试卷不存在": "Paper does not exist",
+"保存试卷": "Save paper",
+"只有桌面版里能用": "Only available in the desktop version",
+"文档\\Tetra": "Documents\\Tetra",
+"导出的 Word、PDF 存到哪个文件夹": "Folder for exported Word and PDF files",
+"把 Tetra 的数据放到哪个文件夹": "Folder for Tetra data",
+"文件不在了（可能已经移走或删掉了）": "File no longer exists (it may have been moved or deleted)",
+"从源码运行时没有程序文件夹": "No program folder when running from source",
+"还有题在出，等出完再重新打开": "Questions are still being generated; wait until they finish before reopening",
 "命题智能体导出的个人设置和全部出题记录；不含 API Key。": "Personal settings and all generation records exported by the Composer agent; does not include the API Key.",
 "附件已经过期（服务重启过，或者传上来太久了），请重新添加一次": "The attachment has expired (the service restarted, or it was uploaded too long ago). Please add it again.",
 "其他": "Other",
@@ -2042,6 +2095,10 @@ export const EN = {
 "{0} questions removed from folders; back to Uncategorized"
 ],
 [
+"已保存：{0}",
+"Saved: {0}"
+],
+[
 "导出失败（{0}）",
 "Export failed ({0})"
 ],
@@ -2188,6 +2245,22 @@ export const EN = {
 [
 "输入“{0}”确认",
 "Type \"{0}\" to confirm"
+],
+[
+"{0}，程序在 {1}",
+"{0}, the program is in {1}"
+],
+[
+"这些设置只在桌面版里有。{0}。",
+"These settings are only available in the desktop version. {0}."
+],
+[
+"下次打开 Tetra 时，数据会复制到：{0}（原来的文件夹原样保留，确认没问题以后可以自己删）。",
+"The next time you open Tetra, your data will be copied to: {0} (the original folder is kept as is; you can delete it once you've confirmed everything is fine)."
+],
+[
+"没读出桌面版的设置：{0}",
+"Couldn't read desktop settings: {0}"
 ],
 [
 "把关用 {0}",
@@ -2396,6 +2469,14 @@ export const EN = {
 [
 "这次没画成{0}，可以写一句要求（比如画成什么样的图）再试",
 "This time {0} wasn't generated. Add a note about what you want (e.g. what the figure should look like) and try again"
+],
+[
+"保存的文件夹建不了：{0}。可以在「个人设置 → 桌面版」里换一个",
+"Couldn't create the save folder: {0}. You can change it in Settings → Desktop version"
+],
+[
+"没存进去（{0}）：文件可能正开着，关掉以后再试",
+"Save failed ({0}): the file may be open; close it and try again"
 ],
 [
 "{0} 太大了：一个文件最多 {1} MB",

@@ -5,3 +5,4 @@ data/runtime/
 *.pyc
 *.egg-info/
 build/
+dist/
