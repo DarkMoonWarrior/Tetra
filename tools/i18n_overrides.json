@@ -140,5 +140,6 @@
   "题库整理好了": "Question bank organized",
   "不用题库": "No bank questions",
   "这次整理已撤销": "This reorganization was undone",
-  "这次没有改动题库": "No changes to the question bank"
+  "这次没有改动题库": "No changes to the question bank",
+  "连不上 Tetra：可能已经退出了。重新打开 Tetra，连上后页面会自动恢复。": "Can't connect to Tetra: it may have quit. Open Tetra again; the page will reconnect automatically."
 }

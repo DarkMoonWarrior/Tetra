@@ -3,8 +3,8 @@
 // 建议要你点"采用"才生效；可以导出，也可以一次删掉全部偏好（出题记录不受影响）。
 
 import {
-  $, DETAIL, DIFFICULTY_LABEL, MODES, PURPOSES, THINKING, TYPE_LABEL, el, formatWhen, modelName, request, runtime, segmented,
-  strongModel, svg, toast,
+  $, DESKTOP_WINDOW, DETAIL, DIFFICULTY_LABEL, MODES, PURPOSES, THINKING, TYPE_LABEL, el, formatWhen, modelName, request, runtime,
+  segmented, strongModel, svg, toast,
 } from './shared.js';
 import { applyTheme } from './theme.js';
 import { setLanguage } from './i18n.js';
@@ -206,35 +206,16 @@ function renderMenu() {
     });
     menu.append(button);
   }
-  // 桌面程序的窗口里：多一项"在浏览器中打开"（同一个服务，平时用的浏览器也能用，地址写在下面）
-  const desktop = runtime.desktop;
-  if (desktop) {
-    const button = el('button', 'account-item');
-    button.type = 'button';
-    button.setAttribute('role', 'menuitem');
-    button.innerHTML = svg('globe');
-    const words = el('span');
-    words.append(el('b', '', '在浏览器中打开'), el('small', '', desktop.address));
-    button.append(words);
-    button.addEventListener('click', async () => {
-      closeMenu();
-      try {
-        await request('/api/open-browser', { method: 'POST' });
-      } catch (error) {
-        toast(error.message);
-      }
-    });
-    menu.append(button);
-  }
   // 连接正常时不显示；只有出了问题（没有可用的模型、连不上本机服务）才在菜单底部说一句
   const health = ctx.health();
   if (!health.ok) menu.append(el('p', 'account-status bad', health.text));
 }
 
-// 是不是桌面程序打开的（/api/health 的 desktop）：runtime.desktop = { address } 或 null；顺便记下数据文件夹
+// 是不是桌面版：Tetra.exe 打开的窗口（DESKTOP_WINDOW），连的也是桌面版起的服务（/api/health 的 desktop）。
+// runtime.desktop = { address } 或 null；顺便记下数据文件夹
 function checkDesktop() {
   request('/api/health').then((info) => {
-    runtime.desktop = info.desktop ? { address: info.address } : null;
+    runtime.desktop = info.desktop && DESKTOP_WINDOW ? { address: info.address } : null;
     runtime.dataDir = info.data_dir || '';
   }).catch(() => {});
 }
@@ -933,7 +914,7 @@ function dataSection() {
   const privacy = el('p', 'privacy');
   privacy.append(
     '个人设置、题库和出题记录都保存在这台电脑上（',
-    el('code', '', runtime.dataDir || 'data/runtime'),
+    el('code', '', runtime.dataDir || '%LOCALAPPDATA%\\Tetra\\data'),
     ' 文件夹），不会上传。出题时，题目要求会发给你选的模型服务（你接入的大模型）来生成题目。',
   );
   const exportLink = el('a', 'btn', '导出 JSON');

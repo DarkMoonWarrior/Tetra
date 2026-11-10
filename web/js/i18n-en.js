@@ -425,7 +425,6 @@ export const EN = {
 "这张图片打不开，换一张试试": "Can't open this image. Try another one",
 "个人设置": "Settings",
 "称呼、出题偏好、模型": "Name, generation preferences, models",
-"在浏览器中打开": "Open in browser",
 "改动会自动保存": "Changes save automatically",
 "换一张": "Change",
 "上传头像": "Upload avatar",
@@ -780,7 +779,6 @@ export const EN = {
 "没对上考点": "No topic matched",
 "命题智能体": "Composer agent",
 "重新打开 Tetra": "Reopen Tetra",
-"只有桌面程序里能用": "Only available in the desktop app",
 "请先填写 API Key": "Please fill in the API Key first",
 "这个模型服务不存在（可能已经删掉了）": "This model service does not exist (it may have been deleted)",
 "请先填写要测试的型号": "Please fill in the model to test first",
@@ -1439,7 +1437,8 @@ export const EN = {
 "交付前的检查发现解析或答案不完整": "The final check found the solution or answer incomplete",
 "题面的格式和题型要求对不上": "The statement's format doesn't match the question type",
 "选项编号有重复": "Duplicate option letters",
-"选项内容不能为空，也不能有两个选项完全相同": "Options can't be empty, and no two options may be identical"
+"选项内容不能为空，也不能有两个选项完全相同": "Options can't be empty, and no two options may be identical",
+"连不上 Tetra：可能已经退出了。重新打开 Tetra，连上后页面会自动恢复。": "Can't connect to Tetra: it may have quit. Open Tetra again; the page will reconnect automatically."
 },
 "patterns": [
 [

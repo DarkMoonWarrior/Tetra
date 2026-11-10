@@ -26,6 +26,7 @@ from mingti.attachments import AttachmentError, Uploads
 from mingti.bank import BankQuestion, BankStore, FolderError, Paper
 from mingti.config import BLUEPRINT_JSON, CURRICULA, CURRICULUM_CSV, RUNTIME_DIR, WEB_DIR, load_settings
 from mingti.curriculum_tree import load_tree
+from mingti.datafolder import merge_legacy_data
 from mingti.export import ExportError, merge_pdfs, print_html, print_to_pdf, to_docx
 from mingti.figures import illustrate
 from mingti.importer import ImportError_, ImportManager
@@ -48,6 +49,7 @@ from mingti.store import QuestionStore
 from mingti.team import role_of
 from mingti.tracking import JobRecorder
 
+merge_legacy_data()  # 以前从源码运行时的数据（项目里的 data/runtime）并进网页版、桌面版共用的数据文件夹，只并一次
 settings = load_settings()
 models = ModelRegistry(settings)
 store = QuestionStore(RUNTIME_DIR / "questions.sqlite3")
@@ -108,7 +110,7 @@ def health(request: Request) -> dict:
         "default_model": models.default_id,
         "prompt_revision": PROMPT_REVISION,
         "ui_version": _ui_version(),
-        # 桌面程序里打开的：菜单里多一项"在浏览器中打开"（同一个服务，用平时的浏览器也能用）
+        # 桌面程序起的服务：它自己的窗口里（地址带 ?window=desktop）设置里多一页"桌面版"；浏览器里打开的照常是网页版
         "desktop": DESKTOP,
         "address": str(request.base_url).rstrip("/"),
         "data_dir": str(RUNTIME_DIR),
@@ -121,18 +123,6 @@ async def page_closed(request: Request) -> dict:
     page = (await request.body()).decode("utf-8", errors="ignore").strip()[:60]
     PAGES.pop(page, None)
     return {"ok": True}
-
-
-@app.post("/api/open-browser")
-def open_in_browser(request: Request) -> dict:
-    """桌面程序的窗口里点"在浏览器中打开"：用电脑上默认的浏览器打开这个应用。"""
-    import webbrowser
-
-    address = str(request.base_url).rstrip("/")
-    if not DESKTOP or not re.fullmatch(r"http://(127\.0\.0\.1|localhost):\d+", address):
-        raise HTTPException(400, "只有桌面程序里能用")
-    webbrowser.open(address)
-    return {"opened": address}
 
 
 @app.get("/api/models")

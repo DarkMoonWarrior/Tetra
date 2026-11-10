@@ -1,11 +1,11 @@
 """运行配置：优先读环境变量，其次读项目根目录的 .env。
 
-两种运行方式，文件放的地方不一样：
-- 从源码运行（tetra 命令、run.py）：程序自带的文件（界面、知识树）和会变的数据（题库、设置、模型服务）都在项目目录里，
-  数据在 data/runtime/。
-- 桌面程序（PyInstaller 打包，见 packaging/）：自带的文件在程序解包出来的目录里（sys._MEIPASS）；会变的数据
-  放在用户目录：Windows 是 %LOCALAPPDATA%\\Tetra，macOS 是 ~/Library/Application Support/Tetra。程序目录可能没有写权限，
-  升级时整个换掉也不会丢数据。
+程序自带的文件（界面、知识树）：从源码运行（tetra 命令、run.py）时在项目目录里；桌面程序（PyInstaller 打包，见 packaging/）
+在程序解包出来的目录里（sys._MEIPASS）。
+
+会变的数据（题库、试卷、对话、设置、模型服务）两种方式共用一份，放在用户目录：Windows 是 %LOCALAPPDATA%\\Tetra\\data，
+macOS 是 ~/Library/Application Support/Tetra/data。在桌面版设置里换过数据文件夹，两种方式都跟着换。
+以前从源码运行时数据在项目的 data/runtime 里，第一次用新版本启动时会并进来（见 datafolder.py）。
 设了环境变量 TETRA_HOME 时，两种方式都把会变的数据放到它下面（测试、或者想把数据放在别处时用）。
 """
 
@@ -21,13 +21,11 @@ ROOT = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) if FROZEN els
 DATA_DIR = ROOT / "data"
 
 
-def _app_home() -> Path | None:
-    """会变的数据放在哪个目录下；从源码运行、又没设 TETRA_HOME 时是 None（数据照旧在 data/runtime）。"""
+def _app_home() -> Path:
+    """Tetra 在用户目录下的文件夹：数据、桌面版的偏好和日志都在这里。从源码运行和桌面程序是同一个。"""
     custom = os.environ.get("TETRA_HOME")
     if custom:
         return Path(custom).expanduser().resolve()
-    if not FROZEN:
-        return None
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
     elif sys.platform == "darwin":
@@ -37,11 +35,9 @@ def _app_home() -> Path | None:
     return base / "Tetra"
 
 
-def _runtime_dir(home: Path | None) -> Path:
-    """数据文件夹：从源码运行时是 data/runtime；桌面版默认是 <APP_HOME>/data，在设置里换过位置就用换过的
+def _runtime_dir(home: Path) -> Path:
+    """数据文件夹：默认是 <APP_HOME>/data；在桌面版设置里换过位置就用换过的
     （记在 <APP_HOME>/desktop.json 的 data_dir，见 desktop_os.py）。"""
-    if home is None:
-        return DATA_DIR / "runtime"
     try:
         import json
 
@@ -52,7 +48,10 @@ def _runtime_dir(home: Path | None) -> Path:
 
 
 APP_HOME = _app_home()
+CUSTOM_HOME = bool(os.environ.get("TETRA_HOME"))
 RUNTIME_DIR = _runtime_dir(APP_HOME)
+# 以前从源码运行时的数据文件夹（项目里的 data/runtime）：只用来把旧数据并进 RUNTIME_DIR
+LEGACY_RUNTIME_DIR = DATA_DIR / "runtime"
 CURRICULUM_CSV = DATA_DIR / "curriculum" / "pep-a-full-knowledge-tree-v1.csv"
 # 教材版本：编号 → (界面上的名字, 知识点目录)。B 版目录由 tools/build_pep_b_tree.py 从 A 版知识点重新编排生成
 CURRICULA = {

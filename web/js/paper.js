@@ -43,7 +43,7 @@ async function openSaved(target, path) {
 }
 
 // 导出一份试卷（Word 或 PDF）；trigger 是点的那个按钮，生成期间改成"正在生成…"。
-// 网页端：浏览器下载。桌面版：直接存进设置里的文件夹（默认"文档\Tetra"，或者每次弹另存为），存好后可以打开
+// 网页版（浏览器里打开的）：浏览器下载。桌面版的窗口：直接存进设置里的文件夹（默认"文档\Tetra"，或者每次弹另存为），存好后可以打开
 export async function downloadPaper(paperId, { format, answers = true, title = '试卷', trigger = null }) {
   const label = trigger?.textContent;
   if (trigger) {

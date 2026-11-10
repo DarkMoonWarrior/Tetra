@@ -7,7 +7,7 @@
   不采用的建议，要等同样的选择再多出现 3 次才会重新提；
 - 可以导出成 JSON，也可以一次删除全部偏好（出题记录不受影响）。
 
-本机单人使用，存成 data/runtime/profile.json。
+本机单人使用，存成数据文件夹（config.RUNTIME_DIR）里的 profile.json。
 """
 
 from __future__ import annotations

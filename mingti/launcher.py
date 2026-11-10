@@ -78,13 +78,17 @@ def ensure_venv() -> None:
 
 
 def has_model() -> bool:
-    """有没有接入过模型：界面里接入的（data/runtime/models.json），或者以前写在 .env 里、启动时会自动搬进来的。"""
-    config = ROOT / "data" / "runtime" / "models.json"
-    try:
-        if any(s.get("api_key") and s.get("models") for s in json.loads(config.read_text(encoding="utf-8")).get("services", [])):
-            return True
-    except (OSError, ValueError, AttributeError):
-        pass
+    """有没有接入过模型：界面里接入的（数据文件夹里的 models.json，和桌面版共用；以前的在项目的 data/runtime 里，
+    启动时会并过去），或者以前写在 .env 里、启动时会自动搬进来的。"""
+    from mingti import config  # 只用标准库，系统的 Python 也能导入
+
+    for folder in (config.RUNTIME_DIR, config.LEGACY_RUNTIME_DIR):
+        try:
+            services = json.loads((folder / "models.json").read_text(encoding="utf-8")).get("services", [])
+            if any(s.get("api_key") and s.get("models") for s in services):
+                return True
+        except (OSError, ValueError, AttributeError):
+            continue
     env = ROOT / ".env"
     if os.environ.get("DEEPSEEK_API_KEY", "").strip():
         return True

@@ -170,7 +170,6 @@ const ICONS = {
   'folder-plus': '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M12 10v6M9 13h6"/>',
   'folder-move': '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 13h6M13 10.5l2.5 2.5-2.5 2.5"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
-  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18Z"/>',
   monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
 };
 
@@ -368,14 +367,18 @@ export function renderMath(root) {
 
 // 服务关掉了（或者还没启动）时，fetch 只会抛一句英文的 "Failed to fetch"；换成说得清的提示，
 // 并通知页面在顶部常驻"连不上服务"、自动重连
-export const OFFLINE_MESSAGE = '连不上服务：可能已经关掉了。在终端输入 tetra 重新启动，连上后页面会自动恢复。';
+// 是不是桌面版自己的窗口（Tetra.exe 打开的窗口，地址带 ?window=desktop）。浏览器里打开的都算网页版：
+// 不显示桌面版才有的东西（设置里的"桌面版"一页，导出直接存进文件夹），哪怕连的是桌面版起的服务
+export const DESKTOP_WINDOW = new URLSearchParams(window.location.search).get('window') === 'desktop';
+
+export const OFFLINE_MESSAGE = DESKTOP_WINDOW
+  ? '连不上 Tetra：可能已经退出了。重新打开 Tetra，连上后页面会自动恢复。'
+  : '连不上服务：可能已经关掉了。在终端输入 tetra 重新启动，连上后页面会自动恢复。';
 
 // 这个页面的编号：每次请求都带上（X-Tetra-Page），页面关掉时告诉服务一声。桌面版据此判断还有没有开着的页面，
-// 都关了才退出。桌面版自己的窗口地址带 ?window=desktop，编号以 desktop-window 开头（窗口关了由桌面版替它说）
+// 都关了才退出。桌面版自己的窗口里，编号以 desktop-window 开头（窗口关了由桌面版替它说）
 const RANDOM_ID = window.crypto?.randomUUID?.() || `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-export const PAGE_ID = new URLSearchParams(window.location.search).get('window') === 'desktop'
-  ? `desktop-window-${RANDOM_ID.slice(0, 8)}`
-  : RANDOM_ID;
+export const PAGE_ID = DESKTOP_WINDOW ? `desktop-window-${RANDOM_ID.slice(0, 8)}` : RANDOM_ID;
 window.addEventListener('pagehide', () => {
   try {
     navigator.sendBeacon?.('/api/page-closed', PAGE_ID);

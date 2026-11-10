@@ -21,7 +21,7 @@ FastAPI  mingti/server.py
                  tracking.py 记录每一次调用的耗时和 Token
                  abort.py 点停止时当场断开进行中的请求
   ▼
-存储  data/runtime/ 下的 SQLite 和 JSON
+存储  数据文件夹（默认 %LOCALAPPDATA%\Tetra\data，网页版、桌面版共用）里的 SQLite 和 JSON
 ```
 
 ## 出题流水线

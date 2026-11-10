@@ -2,10 +2,10 @@
 
 - 在本机起服务（和 tetra 命令起的是同一个服务），再用系统自带的 Edge（没有就用 Chrome）以"应用"模式打开一个窗口：
   没有地址栏和标签页，用自己单独的浏览器资料目录，不碰你平时用的浏览器。
-- 网页端照常能用：程序开着时，用任何浏览器打开 http://127.0.0.1:8765 （端口被别的程序占了就往后顺延）就是同一个应用；
-  左下角菜单里也有"在浏览器中打开"。
-- 同一时间只开一个桌面版：再双击一次，只是再开一个窗口。从源码用 tetra 命令起着的服务不借用（它没有桌面版的功能，
-  数据也是另一份）：8765 被它占着时，桌面版换下一个空端口起自己的服务。
+- 网页版和桌面版用同一份数据（config.RUNTIME_DIR）。程序开着时，用浏览器打开 http://127.0.0.1:8765
+  （端口被别的程序占了就往后顺延）也能用，那就是网页版：没有设置里的"桌面版"这一页。
+- 同一时间只开一个桌面版：再双击一次，只是再开一个窗口。从源码用 tetra 命令起着的服务不借用（它没有桌面版的功能）：
+  8765 被它占着时，桌面版换下一个空端口起自己的服务，数据还是同一份。
 - 关掉窗口后，还有题在出，或者还有浏览器页面开着，服务就接着在后台跑，都结束了才退出（题不会出到一半丢掉）。
 - 电脑上没有 Edge、Chrome 时，用默认浏览器打开，另外显示一个小窗口，关掉它就退出。
 
@@ -321,8 +321,10 @@ def _window_open(profile: Path) -> bool:
 
 
 def _fallback_window(url: str) -> None:
-    """没有 Edge、Chrome：用默认浏览器打开，再显示一个小窗口（打开 / 退出），关掉它就退出。"""
-    webbrowser.open(url)
+    """没有 Edge、Chrome：用默认浏览器打开（地址带 ?window=desktop，页面照样当桌面版的窗口），
+    再显示一个小窗口（打开 / 退出），关掉它就退出。"""
+    page = f"{url}/?window=desktop"
+    webbrowser.open(page)
     try:
         import tkinter as tk
         from tkinter import messagebox
@@ -343,7 +345,7 @@ def _fallback_window(url: str) -> None:
             return
         root.destroy()
 
-    tk.Button(row, text="在浏览器中打开", width=14, command=lambda: webbrowser.open(url)).pack(side="left", padx=6)
+    tk.Button(row, text="打开 Tetra", width=12, command=lambda: webbrowser.open(page)).pack(side="left", padx=6)
     tk.Button(row, text="退出 Tetra", width=10, command=quit_app).pack(side="left", padx=6)
     root.protocol("WM_DELETE_WINDOW", quit_app)
     root.mainloop()
@@ -420,7 +422,7 @@ def _argument(name: str) -> str | None:
 
 
 def main() -> None:
-    os.environ["TETRA_DESKTOP"] = "1"  # 让服务知道是桌面程序：菜单里显示"在浏览器中打开"，设置里有"桌面版"
+    os.environ["TETRA_DESKTOP"] = "1"  # 让服务知道是桌面程序：它的窗口里，设置里有"桌面版"这一页
     autostart = _argument("--autostart") is not None
     reuse = _argument("--reuse-window")  # 重启时原来的窗口还开着：在它的端口起服务，不再开新窗口
     reuse_port = int(reuse) if reuse and reuse.isdigit() else None
@@ -439,7 +441,7 @@ def main() -> None:
                 return
             url = f"http://127.0.0.1:{port}"
             if open_window(url, home) is None:
-                webbrowser.open(url)
+                webbrowser.open(f"{url}/?window=desktop")
             return
         port = None
         if reuse_port:

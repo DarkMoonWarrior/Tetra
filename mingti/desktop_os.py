@@ -41,7 +41,7 @@ WINDOWS = os.name == "nt"
 
 def home() -> Path:
     """桌面版自己的目录：偏好、日志、窗口用的浏览器资料（不一定是数据文件夹）。"""
-    return config.APP_HOME or config.DATA_DIR / "runtime" / "desktop"
+    return config.APP_HOME
 
 
 def exe() -> str | None:

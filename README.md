@@ -8,7 +8,7 @@
 
 一句话出题、组卷、导出试卷。每道题都经过多个 AI 角色独立求解和交叉核对，通过了才交到你手上。
 
-[![Download](https://img.shields.io/badge/download-Windows%20installer-0078D6?logo=windows&logoColor=white)](https://github.com/DarkMoonWarrior/Tetra/releases/latest) [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![Version](https://img.shields.io/badge/version-0.1.1-555555)
+[![Download](https://img.shields.io/badge/download-Windows%20installer-0078D6?logo=windows&logoColor=white)](https://github.com/DarkMoonWarrior/Tetra/releases/latest) [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![Version](https://img.shields.io/badge/version-0.1.2-555555)
 
 [下载与安装](#下载与安装) · [功能](#功能) · [工作原理](#工作原理) · [使用手册](docs/user-guide.md) · [架构说明](docs/architecture.md) · [开发指南](docs/development.md)
 
@@ -151,7 +151,7 @@ flowchart LR
 
 ### 安装版（推荐）
 
-1. 在 [Releases](https://github.com/DarkMoonWarrior/Tetra/releases/latest) 下载 `Tetra-Setup-0.1.1.exe`（约 47 MB）。
+1. 在 [Releases](https://github.com/DarkMoonWarrior/Tetra/releases/latest) 下载 `Tetra-Setup-0.1.2.exe`（约 47 MB）。
 2. 双击运行，按中文向导一步步选：
    - **安装位置**：默认 `%LOCALAPPDATA%\Programs\Tetra`，点“浏览”可以换到任何文件夹；
    - **安装给谁用**：只为自己安装（不需要管理员权限），或者为这台电脑的所有用户安装；
@@ -165,17 +165,17 @@ flowchart LR
 
 ### 免安装版
 
-在 [Releases](https://github.com/DarkMoonWarrior/Tetra/releases/latest) 下载 `Tetra-0.1.1-windows-x64.zip`（约 60 MB），解压到任意文件夹，双击里面的 `Tetra.exe`。第一次打开会问要不要在桌面和开始菜单放快捷方式。不用了直接删掉这个文件夹。
+在 [Releases](https://github.com/DarkMoonWarrior/Tetra/releases/latest) 下载 `Tetra-0.1.2-windows-x64.zip`（约 60 MB），解压到任意文件夹，双击里面的 `Tetra.exe`。第一次打开会问要不要在桌面和开始菜单放快捷方式。不用了直接删掉这个文件夹。
 
 ### 第一次使用
 
 1. 点左下角的头像 →「个人设置」→「模型服务」，选一个模板（DeepSeek、智谱 GLM、OpenAI、Claude），填上 API Key。不用改配置文件，也不用重启。
 2. 回到首页，用一句话说要求，比如“出一道考查椭圆离心率的单选题，难度中档”，或者“帮我组一套高一期中试卷”。
 
-### 桌面版的设置和网页端
+### 桌面版的设置和网页版
 
-- **桌面版的设置**：「个人设置」→「桌面版」里可以改开机自动启动（可以只在任务栏里最小化）、桌面和开始菜单的快捷方式、导出的 Word / PDF 默认存到哪个文件夹（或者每次都问）、题库数据放在哪个文件夹。
-- **同时用网页端**：桌面版开着时，用任何浏览器打开 http://127.0.0.1:8765 也是同一个 Tetra，题库、对话都一样；左下角菜单里也有“在浏览器中打开”。
+- **桌面版的设置**：「个人设置」→「桌面版」里可以改开机自动启动（可以只在任务栏里最小化）、桌面和开始菜单的快捷方式、导出的 Word / PDF 默认存到哪个文件夹（或者每次都问）、题库数据放在哪个文件夹。这一页只在桌面版的窗口里有。
+- **网页版和桌面版用同一份数据**：在网页版（[从源码运行](#从源码运行)的 `tetra`）里出的题、组的卷、聊过的对话和设置，打开桌面版都能看到，反过来也一样。桌面版开着时，用浏览器打开 http://127.0.0.1:8765 也能用，那是网页版，设置里没有「桌面版」这一页。
 - **关闭**：关掉窗口就退出；还有题在出、或者浏览器里还开着 Tetra 时，会在后台出完、等页面关了再退出，题不会出到一半丢掉。
 - 窗口用 Windows 自带的 Edge 内核显示，和你平时用的浏览器互不影响；导出 PDF 也用它。装了 Microsoft Word 时，导出的 Word 里公式是 Word 原生公式，可以直接改；没装 Word 时公式保留 LaTeX 写法。
 
@@ -189,6 +189,8 @@ tetra
 ```
 
 第一次运行时，`tetra` 会在项目里创建 `.venv`、安装依赖，然后打开浏览器（http://127.0.0.1:8765）。以后在任意终端输入 `tetra` 就能启动；也可以双击 `启动命题智能体.bat`。目前在 Windows 11 上开发和测试。
+
+数据和桌面版共用（见[数据与隐私](#数据与隐私)）。以前的版本把数据放在项目的 `data/runtime/` 里，更新后第一次运行 `tetra` 时会自动并进共用的数据文件夹，原来的文件夹留着当备份。
 
 ### 自己打包桌面版
 
@@ -227,7 +229,7 @@ winget install --id JRSoftware.InnoSetup -e --scope user
 目前是单机应用，没有账号和权限控制，每个人在自己的电脑上运行，数据各自一份。
 
 **桌面版和从源码运行有什么区别？**
-是同一个程序。桌面版自带运行环境，用一个独立的窗口打开，还能设置开机自启、快捷方式和导出位置；从源码运行时用浏览器打开。两者的数据默认分开存放（见下面的“数据与隐私”）。
+是同一个程序，用同一份数据。桌面版自带运行环境，用一个独立的窗口打开，还能设置开机自启、快捷方式和导出位置；从源码运行时在浏览器里用（网页版）。
 
 **换电脑时怎么带走题库？**
 关掉 Tetra，把数据文件夹整个复制到新电脑的同一位置。桌面版也可以先在「个人设置 → 桌面版」里把数据文件夹换到别的磁盘或 U 盘，到新电脑上再选回这个文件夹。
@@ -235,7 +237,7 @@ winget install --id JRSoftware.InnoSetup -e --scope user
 ## 数据与隐私
 
 - 服务只监听 `127.0.0.1`，不对外开放。
-- 题库、试卷、对话、个人设置和 API Key 都只保存在本机：桌面版默认在 `%LOCALAPPDATA%\Tetra\data`（可以在设置里换位置），从源码运行时在项目的 `data/runtime/`，都不进版本库，安装包里也不带。
+- 题库、试卷、对话、个人设置和 API Key 都只保存在本机，网页版和桌面版共用一份：默认在 `%LOCALAPPDATA%\Tetra\data`（可以在桌面版的设置里换位置），不进版本库，安装包里也不带。
 - 出题、聊天和识题时，你的要求和附件会发给你接入的模型服务。
 
 ## 文档
