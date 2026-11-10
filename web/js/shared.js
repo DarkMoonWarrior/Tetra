@@ -371,10 +371,11 @@ export function renderMath(root) {
 export const OFFLINE_MESSAGE = '连不上服务：可能已经关掉了。在终端输入 tetra 重新启动，连上后页面会自动恢复。';
 
 // 这个页面的编号：每次请求都带上（X-Tetra-Page），页面关掉时告诉服务一声。桌面版据此判断还有没有开着的页面，
-// 都关了才退出。桌面版自己的窗口地址带 ?window=desktop，编号固定（窗口关了由桌面版替它说）
+// 都关了才退出。桌面版自己的窗口地址带 ?window=desktop，编号以 desktop-window 开头（窗口关了由桌面版替它说）
+const RANDOM_ID = window.crypto?.randomUUID?.() || `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 export const PAGE_ID = new URLSearchParams(window.location.search).get('window') === 'desktop'
-  ? 'desktop-window'
-  : (window.crypto?.randomUUID?.() || `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`);
+  ? `desktop-window-${RANDOM_ID.slice(0, 8)}`
+  : RANDOM_ID;
 window.addEventListener('pagehide', () => {
   try {
     navigator.sendBeacon?.('/api/page-closed', PAGE_ID);

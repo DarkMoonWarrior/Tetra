@@ -4,7 +4,8 @@
   没有地址栏和标签页，用自己单独的浏览器资料目录，不碰你平时用的浏览器。
 - 网页端照常能用：程序开着时，用任何浏览器打开 http://127.0.0.1:8765 （端口被别的程序占了就往后顺延）就是同一个应用；
   左下角菜单里也有"在浏览器中打开"。
-- 同一时间只开一个服务：再双击一次，或者已经用 tetra 命令起着服务，就只是再开一个窗口。
+- 同一时间只开一个桌面版：再双击一次，只是再开一个窗口。从源码用 tetra 命令起着的服务不借用（它没有桌面版的功能，
+  数据也是另一份）：8765 被它占着时，桌面版换下一个空端口起自己的服务。
 - 关掉窗口后，还有题在出，或者还有浏览器页面开着，服务就接着在后台跑，都结束了才退出（题不会出到一半丢掉）。
 - 电脑上没有 Edge、Chrome 时，用默认浏览器打开，另外显示一个小窗口，关掉它就退出。
 
@@ -30,6 +31,11 @@ PORT = int(os.environ.get("TETRA_PORT") or 8765)  # 想换端口可以设环境�
 # 窗口关了以后，这么多秒没有页面来问过服务，又没有题在出，就退出（页面每分钟会来问一次）
 IDLE_EXIT = float(os.environ.get("TETRA_IDLE_EXIT") or 150)
 BUSY_LIMIT = 30 * 60  # 窗口关了以后，最多再等这么久让还在出的题出完
+# 开窗口以后这么久里看不到窗口，也先别当它关了：浏览器刚更新过时，开窗口的进程会把窗口交给另一个进程、自己马上退出，
+# 那个进程要过一会儿才占上窗口的资料目录（见 _window_open）
+HANDOFF_SECONDS = 15
+# 页面的标题（中文界面、英文界面，英文见 web/js/i18n-en.js）；应用模式的窗口标题就是它
+WINDOW_TITLES = ("Tetra 命题智能体", "Tetra · Math Question Agent")
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # 本机地址不走系统代理
 
 log = logging.getLogger("mingti.desktop")
@@ -57,7 +63,8 @@ def _hold_mutex() -> None:
 
 
 def _minimize(pid: int, timeout: float = 20.0) -> None:
-    """开机启动时把窗口最小化：等这个浏览器进程的窗口出来，再把它缩到任务栏。"""
+    """开机启动时把窗口最小化：等 Tetra 的窗口出来，再把它缩到任务栏。认窗口：属于我们开的浏览器进程，
+    或者标题正好是 Tetra 的页面标题（浏览器把窗口交给了别的进程时；普通浏览器窗口的标题后面还带着浏览器名，不会认错）。"""
     if os.name != "nt":
         return
     import ctypes
@@ -68,9 +75,13 @@ def _minimize(pid: int, timeout: float = 20.0) -> None:
 
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     def collect(hwnd, _param):
+        if not user32.IsWindowVisible(hwnd) or user32.GetWindowTextLengthW(hwnd) == 0:
+            return True
         owner = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
-        if owner.value == pid and user32.IsWindowVisible(hwnd) and user32.GetWindowTextLengthW(hwnd) > 0:
+        title = ctypes.create_unicode_buffer(200)
+        user32.GetWindowTextW(hwnd, title, 200)
+        if owner.value == pid or title.value in WINDOW_TITLES:
             found.append(hwnd)
         return True
 
@@ -165,13 +176,13 @@ def _port_free(port: int) -> bool:
     return True
 
 
-def _pick_port() -> tuple[int, bool]:
-    """(端口, 那里是不是已经有 Tetra 在跑)：8765 被别的程序占了就往后找一个空的。"""
+def _pick_port() -> int:
+    """桌面版自己的服务用哪个端口：8765 被占了就往后找一个空的。
+    占着的哪怕是 Tetra 也不借用：比如从源码用 tetra 命令起的服务，没有桌面版的功能（设置里的"桌面版"、
+    导出存到文件夹……），数据也是项目里的另一份。同一个桌面版再打开一次，在前面的锁那里就已经接上了。"""
     for port in range(PORT, PORT + 30):
-        if _is_tetra(port):
-            return port, True
         if _port_free(port):
-            return port, False
+            return port
     raise RuntimeError(f"端口 {PORT}～{PORT + 29} 都被占用了，没法启动服务")
 
 
@@ -237,7 +248,8 @@ def find_browser() -> str | None:
 
 
 def open_window(url: str, home: Path) -> subprocess.Popen | None:
-    """以"应用"模式开一个 Tetra 窗口；用单独的浏览器资料目录，所以关窗口时这个进程会结束（用来判断窗口关了没有）。"""
+    """以"应用"模式开一个 Tetra 窗口，用单独的浏览器资料目录（home/window）：关窗口时浏览器就退出，
+    据此判断窗口关了没有（_window_open）。"""
     browser = find_browser()
     if not browser:
         return None
@@ -258,6 +270,54 @@ def open_window(url: str, home: Path) -> subprocess.Popen | None:
     except OSError:
         log.exception("没能打开 %s", browser)
         return None
+
+
+def _close_window(window: subprocess.Popen) -> None:
+    """关掉我们开的窗口：先像点 × 那样请它关（浏览器正常退出，下次打开不会提示"意外关闭、要不要恢复"），
+    5 秒还没关再强行结束。"""
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def ask_close(hwnd, _param):
+            owner = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+            if owner.value == window.pid and user32.IsWindowVisible(hwnd):
+                user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+            return True
+
+        user32.EnumWindows(ask_close, 0)
+    else:
+        window.terminate()  # Chrome 收到 SIGTERM 也是正常退出
+    try:
+        window.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        window.kill()
+
+
+def _window_open(profile: Path) -> bool:
+    """窗口用的浏览器还开着没有。Edge、Chrome 开着一份资料目录时一直占着里面的锁文件，退出时文件自己就没了
+    （Windows 上是 lockfile，macOS、Linux 上是指向"主机名-进程号"的 SingletonLock）。
+    不只看我们开的那个进程：浏览器刚更新过时，它会把窗口交给另一个进程、自己马上退出。"""
+    if os.name == "nt":
+        try:
+            os.close(os.open(profile / "lockfile", os.O_WRONLY))
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return True  # 打不开：浏览器占着
+        return False  # 打得开：上次留下的空文件，浏览器没开着
+    try:
+        target = os.readlink(profile / "SingletonLock")
+        os.kill(int(target.rsplit("-", 1)[1]), 0)
+    except PermissionError:
+        return True  # 进程在，只是不让碰
+    except (OSError, ValueError, IndexError):
+        return False
+    return True
 
 
 def _fallback_window(url: str) -> None:
@@ -339,16 +399,31 @@ def _alert(text: str) -> None:
 # ---------- 主流程 ----------
 
 
-def _relaunch() -> None:
-    """重启：起一个新的 Tetra（等这个退出、放开锁以后它再起服务、开窗口）。"""
+def _relaunch(reuse_window_port: int | None = None) -> None:
+    """重启：起一个新的 Tetra（等这个退出、放开锁以后它再起服务、开窗口）。
+    reuse_window_port：原来的窗口不归我们开的进程管（浏览器把它交给了别的进程），或者窗口已经关了、只剩浏览器里的页面时，
+    新的 Tetra 就在这个端口起服务、不再开窗口，页面自己刷新、接上新的服务。"""
     command = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "mingti.desktop"]
+    if reuse_window_port:
+        command.append(f"--reuse-window={reuse_window_port}")
     flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     subprocess.Popen(command, creationflags=flags, close_fds=True)
 
 
+def _argument(name: str) -> str | None:
+    for value in sys.argv[1:]:
+        if value == name:
+            return ""
+        if value.startswith(f"{name}="):
+            return value.split("=", 1)[1]
+    return None
+
+
 def main() -> None:
     os.environ["TETRA_DESKTOP"] = "1"  # 让服务知道是桌面程序：菜单里显示"在浏览器中打开"，设置里有"桌面版"
-    autostart = "--autostart" in sys.argv[1:]
+    autostart = _argument("--autostart") is not None
+    reuse = _argument("--reuse-window")  # 重启时原来的窗口还开着：在它的端口起服务，不再开新窗口
+    reuse_port = int(reuse) if reuse and reuse.isdigit() else None
     home = _home()
     home.mkdir(parents=True, exist_ok=True)
     _prepare_logging(home)
@@ -366,14 +441,20 @@ def main() -> None:
             if open_window(url, home) is None:
                 webbrowser.open(url)
             return
-        port, existing = _pick_port()
+        port = None
+        if reuse_port:
+            # 原来的服务刚退出，端口可能要过一会儿才放开
+            for _ in range(40):
+                if _port_free(reuse_port):
+                    port = reuse_port
+                    break
+                time.sleep(0.25)
+        if port is None:
+            reuse_port = None
+            port = _pick_port()
         url = f"http://127.0.0.1:{port}"
-        if existing:
-            # 用 tetra 命令起着的服务：只开窗口，服务由它自己管
-            log.info("用已经在运行的服务 %s", url)
-            if open_window(url, home) is None:
-                webbrowser.open(url)
-            return
+        if port != PORT and not reuse_port:
+            log.info("端口 %d 被别的程序（也可能是从源码起的 Tetra）占着，桌面版用 %d", PORT, port)
         # 设置里换过数据文件夹：服务打开数据库之前，先把数据搬过去
         from mingti import config, desktop_os
 
@@ -383,34 +464,51 @@ def main() -> None:
         server, thread = _start_server(port)
         instance.publish(port)
         log.info("Tetra 已启动：%s（数据在 %s）", url, config.RUNTIME_DIR)
-        window = open_window(url, home)
+        window = None if reuse_port else open_window(url, home)
         if window is not None and autostart and desktop_os.load_prefs().get("autostart_minimized", True):
             threading.Thread(target=_minimize, args=(window.pid,), name="tetra-minimize", daemon=True).start()
-        if not autostart and not desktop_os.installed():
+        if not autostart and not reuse_port and not desktop_os.installed():
             threading.Thread(target=_offer_shortcut, args=(home,), name="tetra-shortcut", daemon=True).start()
         from mingti import server as srv
 
-        if window is None:
+        if window is None and not reuse_port:
             _fallback_window(url)
         else:
-            while window.poll() is None:
-                if srv.RESTART_REQUESTED:
-                    restart = True
-                    window.terminate()
+            # 一、等窗口关掉：我们开的浏览器进程还在，或者浏览器还占着窗口的资料目录，窗口就开着（_window_open）
+            profile = home / "window"
+            opened = time.monotonic()
+            keep_window = reuse_port is not None  # 重启时不关窗口，让页面自己接上新的服务
+            handed_off = False
+            while not srv.RESTART_REQUESTED:
+                if window is not None and window.poll() is None:
+                    pass
+                elif _window_open(profile):
+                    keep_window = True  # 窗口不归我们开的进程管：重启时关不掉它，只能沿用
+                    if not handed_off:
+                        handed_off = True
+                        log.info("浏览器把窗口交给了别的进程，改看窗口的资料目录")
+                elif time.monotonic() - opened >= HANDOFF_SECONDS:
                     break
                 time.sleep(0.5)
-            # 窗口关了：桌面版窗口里的页面不算了；还有题在出、或者浏览器里还开着 Tetra 的页面，就接着跑
-            srv.PAGES.pop("desktop-window", None)
-            closed = time.monotonic()
-            while thread.is_alive() and not restart:
-                busy = _busy()
-                if busy and time.monotonic() - closed < BUSY_LIMIT:
-                    time.sleep(2)
-                    continue
-                if not busy and _open_pages():
-                    time.sleep(2)
-                    continue
-                break
+            if not srv.RESTART_REQUESTED:
+                for page in [key for key in srv.PAGES if key.startswith("desktop-window")]:
+                    srv.PAGES.pop(page, None)  # 窗口关了：它的页面不算了
+                keep_window = True  # 窗口已经关了：重启时也不再开窗口，浏览器里开着的页面自己接上
+                # 二、还有题在出，或者浏览器里还开着 Tetra 的页面，就接着在后台跑；都没有了才退出
+                closed = time.monotonic()
+                empty_since = None
+                while thread.is_alive() and not srv.RESTART_REQUESTED:
+                    if _open_pages() or (_busy() and time.monotonic() - closed < BUSY_LIMIT):
+                        empty_since = None
+                    elif empty_since is None:
+                        empty_since = time.monotonic()
+                    elif time.monotonic() - empty_since > 5:  # 连着几秒都没有：页面刷新时会有一小会儿不在名单里
+                        break
+                    time.sleep(1)
+            restart = srv.RESTART_REQUESTED
+            if restart and not keep_window:
+                _close_window(window)  # 新的 Tetra 再开一个
+            reuse_port = port if restart and keep_window else None
         server.should_exit = True
         thread.join(timeout=10)
         log.info("Tetra 已退出" + ("，马上重新打开" if restart else ""))
@@ -421,7 +519,7 @@ def main() -> None:
         if instance.handle is not None:
             instance.handle.close()  # 放开锁，重启时新的 Tetra 才能起服务
     if restart:
-        _relaunch()
+        _relaunch(reuse_port)
 
 
 if __name__ == "__main__":

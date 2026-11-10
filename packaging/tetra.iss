@@ -1,11 +1,11 @@
 ; Tetra 的 Windows 安装程序（Inno Setup 6）。由 packaging/build_windows.py 在打包完以后调用：
-;   ISCC /DAppVersion=0.1.0 /DSourceDir=<dist\Tetra> /DOutputDir=<dist> packaging\tetra.iss
+;   ISCC /DAppVersion=0.1.1 /DSourceDir=<dist\Tetra> /DOutputDir=<dist> packaging\tetra.iss
 ; 生成 dist\Tetra-Setup-<版本>.exe。安装时可以选：安装位置、只为自己装还是为所有用户装、桌面快捷方式、开机自启。
 ; 默认只为当前用户安装（不用管理员权限），装在 %LOCALAPPDATA%\Programs\Tetra。
 ; 用户数据（题库、设置、Key）不在安装目录里，在 %LOCALAPPDATA%\Tetra；卸载时会问要不要一起删。
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.1.1"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist\Tetra"

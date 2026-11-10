@@ -1017,6 +1017,22 @@ async function desktopCall(path, body = null, method = 'POST') {
   return request(path, body === null ? { method } : { method, body: JSON.stringify(body) });
 }
 
+// 重新打开 Tetra 以后：这个页面要是没跟着窗口一起关掉（浏览器里的页面，或者窗口不归 Tetra 开的进程管），
+// 等服务停下、新的服务起来，就自己刷新一下，用上新的服务和数据
+async function reloadWhenBack() {
+  const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+  const up = () => fetch('/api/health', { cache: 'no-store' }).then((response) => response.ok, () => false);
+  let stopped = false;
+  for (let tries = 0; tries < 180; tries += 1) {
+    await wait(500);
+    if (!(await up())) stopped = true;
+    else if (stopped) {
+      window.location.reload();
+      return;
+    }
+  }
+}
+
 function pathLine(path) {
   const line = el('p', 'path-line');
   line.append(el('code', '', path));
@@ -1095,6 +1111,7 @@ function desktopSection() {
           try {
             await desktopCall('/api/desktop/restart');
             setStatus('正在重新打开 Tetra…');
+            reloadWhenBack();
           } catch (error) {
             setStatus(error.message, true);
           }

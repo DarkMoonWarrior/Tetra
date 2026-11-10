@@ -8,7 +8,7 @@
 
 一句话出题、组卷、导出试卷。每道题都经过多个 AI 角色独立求解和交叉核对，通过了才交到你手上。
 
-[![Download](https://img.shields.io/badge/download-Windows%20installer-0078D6?logo=windows&logoColor=white)](https://github.com/DarkMoonWarrior/Tetra/releases/latest) [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![Version](https://img.shields.io/badge/version-0.1.0-555555)
+[![Download](https://img.shields.io/badge/download-Windows%20installer-0078D6?logo=windows&logoColor=white)](https://github.com/DarkMoonWarrior/Tetra/releases/latest) [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![Version](https://img.shields.io/badge/version-0.1.1-555555)
 
 [下载与安装](#下载与安装) · [功能](#功能) · [工作原理](#工作原理) · [使用手册](docs/user-guide.md) · [架构说明](docs/architecture.md) · [开发指南](docs/development.md)
 
@@ -151,7 +151,7 @@ flowchart LR
 
 ### 安装版（推荐）
 
-1. 在 [Releases](https://github.com/DarkMoonWarrior/Tetra/releases/latest) 下载 `Tetra-Setup-0.1.0.exe`（约 47 MB）。
+1. 在 [Releases](https://github.com/DarkMoonWarrior/Tetra/releases/latest) 下载 `Tetra-Setup-0.1.1.exe`（约 47 MB）。
 2. 双击运行，按中文向导一步步选：
    - **安装位置**：默认 `%LOCALAPPDATA%\Programs\Tetra`，点“浏览”可以换到任何文件夹；
    - **安装给谁用**：只为自己安装（不需要管理员权限），或者为这台电脑的所有用户安装；
@@ -165,7 +165,7 @@ flowchart LR
 
 ### 免安装版
 
-在 [Releases](https://github.com/DarkMoonWarrior/Tetra/releases/latest) 下载 `Tetra-0.1.0-windows-x64.zip`（约 60 MB），解压到任意文件夹，双击里面的 `Tetra.exe`。第一次打开会问要不要在桌面和开始菜单放快捷方式。不用了直接删掉这个文件夹。
+在 [Releases](https://github.com/DarkMoonWarrior/Tetra/releases/latest) 下载 `Tetra-0.1.1-windows-x64.zip`（约 60 MB），解压到任意文件夹，双击里面的 `Tetra.exe`。第一次打开会问要不要在桌面和开始菜单放快捷方式。不用了直接删掉这个文件夹。
 
 ### 第一次使用
 
