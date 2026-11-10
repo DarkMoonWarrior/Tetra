@@ -20,6 +20,7 @@ FastAPI  mingti/server.py
   └─ 模型调用    deepseek.py（兼容 OpenAI 的接口）、claude.py（Anthropic SDK）
                  tracking.py 记录每一次调用的耗时和 Token
                  abort.py 点停止时当场断开进行中的请求
+                 net.py 每次请求现选路：系统代理优先，走不通改直连
   ▼
 存储  数据文件夹（默认 %LOCALAPPDATA%\Tetra\data，网页版、桌面版共用）里的 SQLite 和 JSON
 ```

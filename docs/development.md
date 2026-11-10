@@ -64,6 +64,18 @@ winget install --id JRSoftware.InnoSetup -e --scope user
 
 以前从源码运行时数据在项目的 `data/runtime/`（仍在 `.gitignore` 里）。服务启动时 `mingti/datafolder.py` 把它并进数据文件夹，只并一次：表里的行按主键并（编号都是随机的，两边不会撞，已经有的不动），模型服务按编号并，个人设置用改过次数多的那份。并完在 `data/runtime/` 里留一个说明文件，以后不再并；设了 `TETRA_HOME` 时不并。
 
+## 模型请求走哪条路
+
+规则在 `mingti/net.py`，`deepseek.py`（兼容 OpenAI 的接口，urllib）和 `claude.py`（Anthropic SDK）都按它选路：
+
+- 每次请求都重新读系统的代理设置（环境变量 `HTTP_PROXY` / `HTTPS_PROXY`；没有环境变量时，Windows 读“Internet 选项”里的代理）。不能在启动时读一次：开着代理启动、之后关掉代理，请求还往关掉的代理发，会一直连不上模型。所以不要用 `urllib.request.urlopen`、模块级的 opener，也不要用 SDK 默认的 HTTP 客户端，它们都是只读一次。
+- 设了代理的先走代理，没连上（代理软件关了、代理连不上这家服务）再直连。连接这一步单独限时 15 秒（`CONNECT_TIMEOUT`），一条路不通很快就换下一条。
+- 请求发出去以后、等回复时断了：只有原因是代理没了才换直连重发一次，否则照常报错（多半是服务那边的问题）。用户点了停止时不重发。
+- 刚失败过的路记一会儿（代理 2 分钟、直连 30 秒），之后的请求先试别的路；但哪条路都不跳过，前面的没走通还是会试它。
+- 本机和局域网里的地址不走代理；SOCKS 代理不支持，当没有。
+
+兼容 OpenAI 的接口用 `deepseek.fetch()` 发请求；Claude 那边是 `claude._RoutedTransport`，挂在 SDK 的 HTTP 客户端上。
+
 ## 专题识别模型
 
 `data/topic_model.json.gz` 是离线训练后导出的专题识别模型：词表、idf、各专题的系数和两个阈值，不含任何训练题目，`mingti/topic_model.py` 只用标准库读取和计算。训练数据是讲义题库，不随仓库发布；换了训练数据或者改了文字预处理（`normalize`），要重新导出这个文件，并保证两边的 `normalize` 一致。

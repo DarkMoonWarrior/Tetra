@@ -141,5 +141,6 @@
   "不用题库": "No bank questions",
   "这次整理已撤销": "This reorganization was undone",
   "这次没有改动题库": "No changes to the question bank",
-  "连不上 Tetra：可能已经退出了。重新打开 Tetra，连上后页面会自动恢复。": "Can't connect to Tetra: it may have quit. Open Tetra again; the page will reconnect automatically."
+  "连不上 Tetra：可能已经退出了。重新打开 Tetra，连上后页面会自动恢复。": "Can't connect to Tetra: it may have quit. Open Tetra again; the page will reconnect automatically.",
+  "模型{0}失败：连不上 {1}（{2}）。请检查网络；这家服务要通过代理访问的话，请先打开代理": "Model {0} failed: can't reach {1} ({2}). Check your network; if this service needs a proxy, turn the proxy on first"
 }

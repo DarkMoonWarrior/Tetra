@@ -10,12 +10,12 @@ API Key 只存在这台电脑上；返回给页面时只给头尾几位，页面
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import threading
 import time
 import urllib.error
-import urllib.request
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -23,7 +23,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mingti import presets
-from mingti.deepseek import DeepSeekClientError, DeepSeekJsonClient
+from mingti.deepseek import DeepSeekClientError, DeepSeekJsonClient, fetch
 
 # 思考强度怎么告诉模型："effort" 只用于 Claude 的官方接口，其余几种是兼容 OpenAI 接口的各家写法
 ThinkingStyle = Literal["thinking", "enable_thinking", "reasoning_effort", "effort", "none"]
@@ -136,22 +136,19 @@ def make_client(
 def discover_models(base_url: str, api_key: str, *, api: str = "openai", preset: str = "", timeout: int = 15) -> list[str]:
     """问这家服务有哪些模型：兼容 OpenAI 接口的 GET /models，Claude 用官方 SDK 的 Models API。
     从模板接入的按模板挑出对话型号（OpenAI 的列表里还有语音、画图这些）。
-    和出题请求一样走系统代理：境外的服务在国内要靠它才连得上。"""
+    和出题请求一样选路（net.py）：系统设了代理就先走代理（境外的服务在国内要靠它才连得上），走不通再直连。"""
     if api == "anthropic":
         try:
             from mingti.claude import list_models
         except ImportError as exc:
             raise DeepSeekClientError("要用 Claude，需要先安装 anthropic 包") from exc
         return presets.filter_models(preset, list_models(api_key, base_url, timeout))
-    request = urllib.request.Request(
-        base_url.rstrip("/") + "/models", headers={"Authorization": f"Bearer {api_key}"}
-    )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        body = fetch(base_url.rstrip("/") + "/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=timeout)
+        data = json.loads(body.decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise DeepSeekClientError(f"模型服务返回 HTTP {exc.code}，请检查接口地址和 API Key") from exc
-    except (OSError, ValueError) as exc:
+    except (OSError, http.client.HTTPException, ValueError) as exc:
         raise DeepSeekClientError(f"连不上这个接口地址：{exc}") from exc
     ids = [str(item.get("id")) for item in data.get("data", []) if isinstance(item, dict) and item.get("id")]
     return presets.filter_models(preset, list(dict.fromkeys(ALIASES.get(model, model) for model in ids)))

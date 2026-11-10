@@ -3,11 +3,12 @@ from __future__ import annotations
 import http.client
 import json
 import re
+import urllib.parse
 import urllib.request
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
-from mingti import abort
+from mingti import abort, net
 
 
 class DeepSeekClientError(RuntimeError):
@@ -28,16 +29,30 @@ def _watch(connection: http.client.HTTPConnection) -> None:
         raise
 
 
+def _connect(connection: http.client.HTTPConnection, connect) -> None:  # noqa: ANN001 - connect 是父类的 connect
+    """连接这一步单独限时（net.CONNECT_TIMEOUT，含过代理和 TLS 握手），连上以后恢复成请求自己的时限：
+    一条路不通时很快就能知道、换下一条，不用等到整个请求超时。连上以后把连接登记给当前任务。"""
+    full = connection.timeout
+    limited = isinstance(full, (int, float)) and full > net.CONNECT_TIMEOUT
+    if limited:
+        connection.timeout = net.CONNECT_TIMEOUT
+    try:
+        connect()
+    finally:
+        connection.timeout = full
+    if limited and connection.sock is not None:
+        connection.sock.settimeout(full)
+    _watch(connection)
+
+
 class _AbortableHTTPConnection(http.client.HTTPConnection):
     def connect(self) -> None:
-        super().connect()
-        _watch(self)
+        _connect(self, super().connect)
 
 
 class _AbortableHTTPSConnection(http.client.HTTPSConnection):
     def connect(self) -> None:
-        super().connect()
-        _watch(self)
+        _connect(self, super().connect)
 
 
 class _HTTPHandler(urllib.request.HTTPHandler):
@@ -50,8 +65,47 @@ class _HTTPSHandler(urllib.request.HTTPSHandler):
         return super().do_open(_AbortableHTTPSConnection, req, **kwargs)
 
 
-# 和 urlopen 用的默认 opener 一样（系统代理照常生效），只是连接换成可以掐断的
-_OPENER = urllib.request.build_opener(_HTTPHandler, _HTTPSHandler)
+# 每条路（某个代理，或者直连）一个 opener，连接都换成可以掐断的。走哪条路由 net.Routes 每次请求现定：
+# 不能像 urlopen 那样用启动时读到的代理设置，不然程序开着的时候关掉代理，请求还往关掉的代理发
+_openers: dict[str | None, urllib.request.OpenerDirector] = {}
+
+
+def _opener(route: str | None) -> urllib.request.OpenerDirector:
+    opener = _openers.get(route)
+    if opener is None:
+        proxies = urllib.request.ProxyHandler({"http": route, "https": route} if route else {})
+        opener = _openers.setdefault(route, urllib.request.build_opener(proxies, _HTTPHandler, _HTTPSHandler))
+    return opener
+
+
+def fetch(
+    url: str, *, timeout: float, data: bytes | None = None, headers: dict[str, str] | None = None,
+    method: str | None = None,
+) -> bytes:
+    """发一次请求，返回回复的内容。系统设了代理就先走代理，走不通再直连（见 net.py），开不开代理都能用。
+
+    服务有回复就算这条路是通的：报错的状态码照常抛 HTTPError。没连上抛 URLError，等回复时断了抛 OSError /
+    http.client.HTTPException，都是最后试的那条路的错。用户点了停止时不换路，原样抛出去。"""
+    plan = net.Routes(url)
+    for route in plan:
+        # 每条路用新的 Request：过代理时 urllib 会改它（把主机换成代理的）
+        request = Request(url, data=data, headers=headers or {}, method=method)
+        try:
+            with _opener(route).open(request, timeout=timeout) as response:
+                body = response.read()
+        except HTTPError:
+            plan.succeeded(route)
+            raise
+        except URLError as exc:  # 没连上，或者请求没发出去
+            if abort.aborted() or not plan.failed(route, exc.reason):
+                raise
+        except (OSError, http.client.HTTPException) as exc:  # 请求发出去了，等回复、读回复时断的
+            if abort.aborted() or not plan.failed(route, exc, sent=True):
+                raise
+        else:
+            plan.succeeded(route)
+            return body
+    raise URLError("no route")  # 走不到这里：Routes 至少给一条路
 
 
 # 常见的出错情况先说人话，原始信息放在括号里
@@ -298,21 +352,19 @@ class DeepSeekJsonClient:
             payload["max_completion_tokens"] = value
 
     def _post_json(self, *, payload: dict, action: str, timeout: float | None = None) -> dict:
-        request = Request(
-            f"{self.base_url}/chat/completions",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
+        url = f"{self.base_url}/chat/completions"
         scope = abort.current()
         if scope is not None:
             scope.check()
         try:
-            with _OPENER.open(request, timeout=timeout or self.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
+            body = fetch(
+                url,
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                method="POST",
+                timeout=timeout or self.timeout_seconds,
+            )
+            return json.loads(body.decode("utf-8"))
         except abort.StopRequested:
             raise
         except HTTPError as exc:
@@ -335,6 +387,11 @@ class DeepSeekJsonClient:
             # 连接是用户点停止时掐断的：不是出错，报"停下了"
             if abort.aborted():
                 raise abort.StopRequested() from exc
+            if isinstance(exc, URLError):  # 代理、直连都没连上
+                host, reason = urllib.parse.urlsplit(url).hostname, str(exc.reason).rstrip("。. ")
+                raise DeepSeekClientError(
+                    f"模型{action}失败：连不上 {host}（{reason}）。请检查网络；这家服务要通过代理访问的话，请先打开代理"
+                ) from exc
             raise DeepSeekClientError(f"模型{action}失败：{exc}") from exc
 
     @staticmethod

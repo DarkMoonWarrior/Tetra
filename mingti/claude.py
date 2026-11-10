@@ -10,13 +10,23 @@
 - 一律用流式请求再取完整结果，输出上限放得再大也不会因为单次请求太久而超时。
 - 服务端兜底（fallbacks）：Opus、Sonnet 这几个型号被安全分类器拒答时，由服务端按拒答类别换一个型号重跑；
   Haiku 没有这个功能，不加。
+- 走哪条路每次请求现定（_RoutedTransport，规则见 net.py）：系统设了代理就先走代理，没连上再直连，
+  程序开着的时候开、关代理都马上生效。
 """
 
 from __future__ import annotations
 
+import socket
+import threading
+
 import anthropic
 
-from mingti import abort
+try:
+    import httpx2 as _httpx  # Anthropic SDK 2.x 用的 HTTP 库
+except ImportError:  # 早一些的 SDK 用 httpx，这里用到的接口两者一样
+    import httpx as _httpx
+
+from mingti import abort, net
 from mingti.deepseek import _HTTP_HINTS, DeepSeekClientError, DeepSeekJsonClient
 
 DEFAULT_BASE_URL = "https://api.anthropic.com"
@@ -25,9 +35,73 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 _NETWORK_HINT = "在国内一般要能访问境外网络（开着代理），或者改用能转发 Claude 接口的地址"
 
 
+def _keepalive() -> list[tuple[int, int, int | bool]]:
+    """和 SDK 自己建连接时一样：开着 TCP 保活，长时间等回复时连接不容易被中间的设备掐掉。"""
+    options: list[tuple[int, int, int | bool]] = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, True)]
+    for name, value in (("TCP_KEEPINTVL", 60), ("TCP_KEEPCNT", 5), ("TCP_KEEPIDLE", 60)):
+        option = getattr(socket, name, None)
+        if option is not None:
+            options.append((socket.IPPROTO_TCP, option, value))
+    return options
+
+
+class _RoutedTransport(_httpx.BaseTransport):
+    """SDK 的每个请求都现选一条路（net.Routes）：系统设了代理就先走代理，没连上再直连。
+
+    SDK 自带的做法是建客户端时读一次系统的代理设置，之后不变：出题出到一半关掉代理，后面的请求全往
+    已经关掉的代理发；没开代理时建的客户端，之后开了代理也用不上。"""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._transports: dict[str | None, _httpx.HTTPTransport] = {}
+
+    def _transport(self, route: str | None) -> _httpx.HTTPTransport:
+        with self._lock:
+            transport = self._transports.get(route)
+            if transport is None:
+                transport = _httpx.HTTPTransport(
+                    proxy=route, socket_options=_keepalive(),
+                    limits=_httpx.Limits(max_connections=1000, max_keepalive_connections=100),
+                )
+                self._transports[route] = transport
+            return transport
+
+    def handle_request(self, request):  # noqa: ANN001, ANN201 - 和 httpx 的签名一致
+        # 连接这一步单独限时：一条路不通时很快就能换下一条，不用等到整个请求超时
+        timeout = dict(request.extensions.get("timeout") or {})
+        if (timeout.get("connect") or net.CONNECT_TIMEOUT + 1) > net.CONNECT_TIMEOUT:
+            request.extensions["timeout"] = {**timeout, "connect": net.CONNECT_TIMEOUT}
+        plan = net.Routes(str(request.url))
+        for route in plan:
+            try:
+                response = self._transport(route).handle_request(request)
+            except (_httpx.ConnectError, _httpx.ConnectTimeout, _httpx.ProxyError) as exc:
+                if not plan.failed(route, exc):
+                    raise
+            else:
+                plan.succeeded(route)
+                return response
+        raise _httpx.ConnectError("no route", request=request)  # 走不到这里：Routes 至少给一条路
+
+    def close(self) -> None:
+        with self._lock:
+            transports, self._transports = list(self._transports.values()), {}
+        for transport in transports:
+            transport.close()
+
+
+class _HttpClient(anthropic.DefaultHttpxClient):
+    def __del__(self) -> None:  # 和 SDK 自己建的客户端一样：不用了就把连接关掉
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001 - 解释器退出时关不掉也没关系
+            pass
+
+
 def _sdk(api_key: str, base_url: str, timeout: float, max_retries: int = 2) -> anthropic.Anthropic:
     return anthropic.Anthropic(
-        api_key=api_key, base_url=base_url or DEFAULT_BASE_URL, timeout=timeout, max_retries=max_retries
+        api_key=api_key, base_url=base_url or DEFAULT_BASE_URL, timeout=timeout, max_retries=max_retries,
+        http_client=_HttpClient(transport=_RoutedTransport()),
     )
 
 
@@ -95,14 +169,16 @@ class ClaudeJsonClient(DeepSeekJsonClient):
             params.pop("output_config")
         elif learned.get("output_config") == "cap:high" and params["output_config"]["effort"] == "max":
             params["output_config"] = {"effort": "high"}
-        for attempt in range(3):
+        fixes, rerouted = 0, False
+        while True:
             try:
                 message = self._stream(params, timeout)
                 break
             except anthropic.BadRequestError as exc:
                 effort = (params.get("output_config") or {}).get("effort")
-                if attempt == 2 or not effort or "effort" not in str(getattr(exc, "message", exc)):
+                if fixes == 2 or not effort or "effort" not in str(getattr(exc, "message", exc)):
                     raise _status_error(exc) from exc
+                fixes += 1
                 # 这个型号没有 max 这一档（比如 Opus 4.5）：退到 high 再试；
                 # 老一点的型号（Haiku 4.5、Sonnet 4.5）根本不认 effort：去掉再试。都记下来，以后不再发
                 if effort == "max":
@@ -113,7 +189,11 @@ class ClaudeJsonClient(DeepSeekJsonClient):
                     params.pop("output_config")
             except anthropic.APIStatusError as exc:
                 raise _status_error(exc) from exc
-            except anthropic.APIConnectionError as exc:
+            except (anthropic.APIConnectionError, _httpx.TransportError) as exc:
+                # 回复读到一半断了，原因是刚才走的代理没了（比如刚关掉代理软件）：重发一次，这次会改走直连
+                if not rerouted and net.last_route_gone(self.base_url):
+                    rerouted = True
+                    continue
                 raise DeepSeekClientError(f"模型{action}失败：连不上 Claude 的接口（{exc}）。{_NETWORK_HINT}") from exc
         if message.stop_reason == "refusal":
             raise DeepSeekClientError("Claude 按安全策略拒绝了这次请求。可以换一个型号，或者改一下题目要求再试")

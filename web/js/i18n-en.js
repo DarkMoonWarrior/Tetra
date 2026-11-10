@@ -3008,6 +3008,10 @@ export const EN = {
 [
 "选择题要给出 A、B、C、D 四个选项，这一版只有 {0} 个",
 "A choice question needs four options A–D; this version has only {0}"
+],
+[
+"模型{0}失败：连不上 {1}（{2}）。请检查网络；这家服务要通过代理访问的话，请先打开代理",
+"Model {0} failed: can't reach {1} ({2}). Check your network; if this service needs a proxy, turn the proxy on first"
 ]
 ]
 };
